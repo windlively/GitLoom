@@ -1,0 +1,16 @@
+.vscode/**
+.vscode-test/**
+.gitignore
+node_modules/**
+src/**
+webview/**
+tests/**
+scripts/**
+artifacts/**
+playwright-report/**
+test-results/**
+*.config.*
+tsconfig.json
+package-lock.json
+.prettierrc.json
+dist/test-host.cjs

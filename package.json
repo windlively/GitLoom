@@ -1,0 +1,158 @@
+{
+  "name": "git-workbench",
+  "displayName": "GitLoom",
+  "description": "VS Code 原生风格的紧凑 Git 底部面板，保留 IDEA 式更改列表和提交工作流。",
+  "version": "0.4.0",
+  "publisher": "local-workbench",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/windlively/GitLoom.git"
+  },
+  "homepage": "https://github.com/windlively/GitLoom#readme",
+  "bugs": {
+    "url": "https://github.com/windlively/GitLoom/issues"
+  },
+  "engines": {
+    "vscode": "^1.96.0"
+  },
+  "categories": [
+    "SCM Providers",
+    "Other"
+  ],
+  "keywords": [
+    "git",
+    "idea",
+    "changelist",
+    "diff",
+    "git graph"
+  ],
+  "main": "./dist/extension.cjs",
+  "extensionKind": [
+    "workspace"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "capabilities": {
+    "untrustedWorkspaces": {
+      "supported": false
+    },
+    "virtualWorkspaces": false
+  },
+  "contributes": {
+    "commands": [
+      {
+        "command": "gitWorkbench.open",
+        "title": "打开 Git 工作台",
+        "category": "GitLoom",
+        "icon": "$(git-branch)"
+      },
+      {
+        "command": "gitWorkbench.commit",
+        "title": "提交更改",
+        "category": "GitLoom"
+      },
+      {
+        "command": "gitWorkbench.log",
+        "title": "查看提交历史",
+        "category": "GitLoom"
+      },
+      {
+        "command": "gitWorkbench.push",
+        "title": "推送提交",
+        "category": "GitLoom"
+      }
+    ],
+    "viewsContainers": {
+      "panel": [
+        {
+          "id": "gitWorkbench",
+          "title": "GitLoom",
+          "icon": "resources/git-workbench.svg"
+        }
+      ]
+    },
+    "views": {
+      "gitWorkbench": [
+        {
+          "id": "gitWorkbench.workbench",
+          "name": "GitLoom",
+          "type": "webview",
+          "contextualTitle": "GitLoom"
+        }
+      ]
+    },
+    "menus": {
+      "scm/title": [
+        {
+          "command": "gitWorkbench.open",
+          "group": "navigation@0"
+        }
+      ]
+    },
+    "keybindings": [
+      {
+        "command": "gitWorkbench.commit",
+        "key": "ctrl+alt+k",
+        "mac": "cmd+alt+k"
+      },
+      {
+        "command": "gitWorkbench.log",
+        "key": "alt+9",
+        "mac": "cmd+alt+9"
+      }
+    ],
+    "configuration": {
+      "title": "GitLoom",
+      "properties": {
+        "gitWorkbench.historyLimit": {
+          "type": "number",
+          "default": 300,
+          "minimum": 50,
+          "maximum": 2000,
+          "description": "一次加载的提交数量。"
+        },
+        "gitWorkbench.pullStrategy": {
+          "type": "string",
+          "enum": [
+            "ff-only",
+            "rebase",
+            "merge"
+          ],
+          "default": "ff-only",
+          "description": "更新项目的策略，默认仅快进，避免意外产生合并提交。"
+        }
+      }
+    }
+  },
+  "scripts": {
+    "build": "node scripts/build.mjs",
+    "watch": "node scripts/build.mjs --watch",
+    "dev": "vite --host 127.0.0.1 --port 5173",
+    "check": "tsc --noEmit && tsc -p webview/tsconfig.json --noEmit",
+    "test": "tsx --test tests/*.test.ts",
+    "test:host": "node scripts/test-host.mjs",
+    "vscode:prepublish": "npm run check && npm run build",
+    "package": "vsce package --no-dependencies --out artifacts/gitloom-0.4.0.vsix"
+  },
+  "dependencies": {
+    "@vscode/codicons": "^0.0.46-24",
+    "diff": "^8.0.2",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.10.0",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "@types/vscode": "1.96.0",
+    "@vscode/test-electron": "^2.5.2",
+    "@vscode/vsce": "^3.7.0",
+    "esbuild": "^0.25.0",
+    "prettier": "^3.9.10",
+    "tsx": "^4.21.0",
+    "typescript": "^5.7.0",
+    "vite": "^6.4.0"
+  }
+}
