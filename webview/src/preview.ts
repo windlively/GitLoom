@@ -1,4 +1,5 @@
 import type { Change, Commit, FileDiff, Method, Requests, Snapshot } from '../../src/shared/types';
+import { t } from './i18n';
 
 const sourceBefore = `import { useCallback, useState } from 'react';
 import { Command } from '@/components/ui/command';
@@ -174,7 +175,7 @@ export async function previewRequest<M extends Method>(
       before: sourceBefore,
       after: sourceAfter,
       beforeLabel: p.commit ? p.commit.slice(0, 8) + '^' : 'HEAD',
-      afterLabel: p.commit ? p.commit.slice(0, 8) : '工作区',
+      afterLabel: p.commit ? p.commit.slice(0, 8) : t('Working tree'),
       binary: false,
       truncated: false,
     } satisfies FileDiff;

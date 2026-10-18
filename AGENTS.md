@@ -8,7 +8,7 @@ GitLoom（织序）是 VS Code 扩展，借鉴 IntelliJ IDEA 的 Git 操作逻�
 
 - 主工作台位于 VS Code **底部面板**，与终端、输出、问题并列。不要把主工作台改回编辑器标签页、独立网页或单独应用。
 - 主要流程是「本地更改 → Diff → 提交 → Push」，兼顾分支、提交历史、Stash 和冲突处理。
-- 操作逻辑参考 IDEA；视觉遵循 VS Code 的主题、字体、密度和交互习惯。用户文案默认使用简体中文。
+- 操作逻辑参考 IDEA；视觉遵循 VS Code 的主题、字体、密度和交互习惯。界面、命令、设置说明、错误和确认提示跟随 VS Code 显示语言：`zh-*` 使用简体中文，其他语言使用英文。新增用户可见文案必须同时提供中英文。
 - 文件列表、Diff、提交框应能在低高度面板中同时使用。保留分栏拖动、宽度记忆和复位能力。
 - 分支名称支持右键菜单；菜单项应根据当前分支、本地/远程分支、进行中的 Git 操作和忙碌状态正确启用或禁用。
 - 错误必须可见、可理解；明确区分操作成功、操作失败、冲突和用户取消。不要把真实 Git 失败伪装成成功。
@@ -24,8 +24,11 @@ GitLoom（织序）是 VS Code 扩展，借鉴 IntelliJ IDEA 的 Git 操作逻�
 | `src/git/service.ts`                         | Git 子进程、仓库查询、串行写操作、文件内容与路径校验                     |
 | `src/git/parsers.ts`                         | Git 状态、分支、日志、Stash 等输出解析                                   |
 | `src/shared/types.ts`                        | 宿主与 Webview 共用的数据类型及请求协议                                  |
+| `src/shared/i18n.ts`                         | 宿主与 Webview 共用的中英文文案、语言归一化与占位符插值                  |
+| `package.nls.json`、`package.nls.zh-cn.json` | 扩展清单的英文默认文案与简体中文翻译                                     |
 | `webview/src/main.tsx`                       | 工作台视图、选中文件、草稿、异步加载及弹窗                               |
 | `webview/src/bridge.ts`                      | 类型化消息调用、响应匹配、仓库上下文、界面状态持久化                     |
+| `webview/src/i18n.ts`                        | Webview 语言检测与翻译入口（读取宿主注入的 `data-locale`）               |
 | `webview/src/preview.ts`                     | 浏览器预览使用的示例数据和模拟请求                                       |
 | `webview/src/preview-theme.ts`               | 仅开发预览使用的主题样例                                                 |
 | `webview/src/styles.css`、`icons.tsx`        | 主题样式及 Microsoft Codicons 图标适配                                   |
@@ -35,6 +38,7 @@ GitLoom（织序）是 VS Code 扩展，借鉴 IntelliJ IDEA 的 Git 操作逻�
 | `webview/src/virtual.ts`                     | 文件列表与提交历史的虚拟滚动视口和可见范围计算                           |
 | `tests/git.test.ts`、`diff.test.ts`          | 真实临时仓库集成测试和 Diff/提交图算法测试                               |
 | `tests/branch-groups.test.ts`                | 分支前缀分组的本地、远程与多远程场景测试                                 |
+| `tests/i18n.test.ts`                         | 语言归一化、插值、文案完整性与清单本地化测试                             |
 | `tests/host.ts`、`scripts/test-host.mjs`     | 使用隔离配置启动 VS Code 的宿主集成测试                                  |
 | `scripts/build.mjs`                          | 宿主、Webview、CSS 和字体打包                                            |
 | `resources/`                                 | 扩展图标与第三方许可证                                                   |
@@ -97,6 +101,8 @@ Webview 通过消息协议请求操作；文件系统、Git CLI、VS Code API �
 - 分栏应有合理最小宽度、鼠标拖动、键盘调整和默认值复位。窄面板保留可达的分支操作入口。
 - 菜单和弹窗应限制在可见区域内，超出高度时内部滚动，长分支名和文件名不能挤掉操作按钮。
 - 可交互元素提供准确的名称与语义；图标按钮有 `aria-label`，键盘能导航菜单，弹窗管理焦点并支持 Esc。
+- 用户可见文案统一通过 `translate()` / `t()` 输出，不要硬编码中文或英文。英文文案作为 `src/shared/i18n.ts` 的键，中文放入 `zhCN`；清单文案同步更新 `package.nls.json` 与 `package.nls.zh-cn.json`。
+- Webview 语言由宿主通过 `<body data-locale>` 注入；开发预览用 `?lang=zh-cn` / `?lang=en` 检查两种语言。宿主测试以 `--locale=en` 运行，涉及中文错误的断言通过给 `GitService` 传入 `'zh-cn'` 覆盖。
 - UI 改动至少检查深色、浅色、高对比度主题，以及约 `1200×320`、`700×240` 的面板尺寸；不要只验证大窗口截图。
 
 ## 常用命令与验证范围

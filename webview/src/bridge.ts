@@ -1,4 +1,5 @@
 import type { Activity, Method, Requests, Snapshot, View } from '../../src/shared/types';
+import { t } from './i18n';
 import { previewRequest } from './preview';
 
 type HostMessage =
@@ -49,7 +50,7 @@ export async function request<M extends Method>(
     const id = String(++sequence);
     const timer = setTimeout(() => {
       pending.delete(id);
-      reject(new Error('操作尚未完成，请检查 Git 控制台后刷新。'));
+      reject(new Error(t('Operation did not finish. Check the Git console and refresh.')));
     }, 150_000);
     pending.set(id, { resolve: (value) => resolve(value as Requests[M]['result']), reject, timer });
     api.postMessage({ id, method, params, repository });

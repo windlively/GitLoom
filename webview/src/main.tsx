@@ -73,6 +73,7 @@ import { BranchDropdown } from './branch-dropdown';
 import { groupBranches, type BranchFolder } from './branch-groups';
 import { ContextMenu, type MenuAction } from './context-menu';
 import { SelectMenu, type SelectOption } from './select-menu';
+import { dateLocale, t } from './i18n';
 import { offsetRange, uniformRange, useViewport } from './virtual';
 import './styles.css';
 
@@ -101,12 +102,12 @@ const stored = loadState<Stored>({
   drafts: {},
 });
 const statusLabels = {
-  modified: '已修改',
-  added: '新增',
-  deleted: '已删除',
-  renamed: '已重命名',
-  untracked: '未跟踪',
-  conflict: '冲突',
+  modified: t('Modified'),
+  added: t('Added'),
+  deleted: t('Deleted'),
+  renamed: t('Renamed'),
+  untracked: t('Untracked'),
+  conflict: t('Conflict'),
 };
 const statusLetters = {
   modified: 'M',
@@ -128,7 +129,7 @@ const stageState = (change: Change): 'staged' | 'partial' | '' =>
 const basename = (file: string) => file.split('/').at(-1) || file;
 const dirname = (file: string) => file.split('/').slice(0, -1).join('/');
 const shortDate = (date: string) =>
-  new Intl.DateTimeFormat('zh-CN', {
+  new Intl.DateTimeFormat(dateLocale, {
     month: '2-digit',
     day: '2-digit',
     hour: '2-digit',
@@ -261,15 +262,15 @@ function DiffViewer({
     return (
       <div className="diff-view">
         <Empty
-          title={loading ? '正在读取差异…' : '选择文件，查看更改'}
-          detail="在左侧选择一个文件，即可并排审查改动。"
+          title={loading ? t('Reading diff…') : t('Select a file to view changes')}
+          detail={t('Select a file on the left to review changes side by side.')}
         />
       </div>
     );
   return (
     <section
       className={`diff-view ${loading ? 'is-loading' : ''}`}
-      aria-label="文件差异"
+      aria-label={t('File diff')}
       style={{ '--diff-split': `${split}%` } as React.CSSProperties}
     >
       <div className="diff-toolbar">
@@ -287,33 +288,33 @@ function DiffViewer({
         </span>
         <div className="spacer" />
         <IconButton
-          title={context ? '显示完整文件' : '只显示改动及上下文'}
+          title={context ? t('Show full file') : t('Show changes and context only')}
           onClick={() => setContext(!context)}
           className={context ? 'active' : ''}
         >
           <SlidersHorizontal size={15} />
         </IconButton>
         <IconButton
-          title={unified ? '切换为并排 Diff' : '切换为统一 Diff'}
+          title={unified ? t('Switch to side-by-side diff') : t('Switch to unified diff')}
           onClick={() => setUnified(!unified)}
         >
           <ArrowLeftRight size={15} />
         </IconButton>
         {previous && (
-          <IconButton title="上一个文件" onClick={previous}>
+          <IconButton title={t('Previous file')} onClick={previous}>
             <ChevronLeft size={16} />
           </IconButton>
         )}
         {next && (
-          <IconButton title="下一个文件" onClick={next}>
+          <IconButton title={t('Next file')} onClick={next}>
             <ChevronRight size={16} />
           </IconButton>
         )}
-        <IconButton title="在 VS Code 中打开 Diff" onClick={openNative}>
+        <IconButton title={t('Open Diff in VS Code')} onClick={openNative}>
           <ExternalLink size={15} />
         </IconButton>
         {close && (
-          <IconButton title="关闭差异" onClick={close}>
+          <IconButton title={t('Close diff')} onClick={close}>
             <X size={15} />
           </IconButton>
         )}
@@ -322,27 +323,37 @@ function DiffViewer({
         <div>
           <span className="revision-dot" />
           {diff.beforeLabel}
-          <span className="muted">原始版本</span>
+          <span className="muted">{t('Original version')}</span>
         </div>
         <div>
           <span className="revision-dot local" />
           {diff.afterLabel}
-          <span className="muted">{diff.afterLabel === '工作区' ? '本地更改' : '提交版本'}</span>
+          <span className="muted">
+            {diff.afterLabel === 'Working tree' || diff.afterLabel === t('Working tree')
+              ? t('Local Changes')
+              : t('Commit version')}
+          </span>
         </div>
       </div>
       {diff.binary || diff.truncated || comparison.error ? (
         <Empty
           icon={<File size={32} />}
-          title={comparison.error || (diff.binary ? '二进制文件或子模块' : '文件超过预览大小限制')}
-          detail="可使用 VS Code 原生差异编辑器继续查看。"
+          title={
+            comparison.error ||
+            (diff.binary ? t('Binary file or submodule') : t('File exceeds the preview limit'))
+          }
+          detail={t('Use the native VS Code diff editor to continue.')}
         >
           <button className="button" onClick={openNative}>
             <ExternalLink size={14} />
-            打开 Diff
+            {t('Open Diff')}
           </button>
         </Empty>
       ) : !rows.length ? (
-        <Empty title="没有文本差异" detail="文件可能仅修改了权限，或内容已经相同。" />
+        <Empty
+          title={t('No text differences')}
+          detail={t('The file may have only permission changes, or its contents are identical.')}
+        />
       ) : (
         <div className={`diff-code ${unified ? 'unified' : ''}`} tabIndex={0}>
           {unified
@@ -411,7 +422,7 @@ function DiffViewer({
               ))}
           {!unified && (
             <ResizeHandle
-              label="调整左右 Diff 宽度"
+              label={t('Resize the diff panes')}
               target=".diff-side"
               percent
               value={split}
@@ -427,11 +438,11 @@ function DiffViewer({
         <span>UTF-8</span>
         <span>{diff.after.includes('\r\n') ? 'CRLF' : 'LF'}</span>
         <div className="spacer" />
-        <span>{rows.filter((row) => row.type === 'change').length} 行差异</span>
+        <span>{t('{0} changed lines', rows.filter((row) => row.type === 'change').length)}</span>
         <span className="legend-dot removed-dot" />
-        删除
+        {t('Removed')}
         <span className="legend-dot added-dot" />
-        新增
+        {t('Added')}
       </div>
     </section>
   );
@@ -664,7 +675,7 @@ function App() {
             id: String(Date.now()),
             time: Date.now(),
             command: `preview: ${method}`,
-            output: label + '完成（示例数据）',
+            output: t('{0} completed (sample data)', label),
             error: false,
           },
           ...previous,
@@ -675,8 +686,8 @@ function App() {
       const pushError = method === 'commit' ? (result as Requests['commit']['result']).pushError : undefined;
       setNotice(
         pushError
-          ? { message: `本地提交已完成，推送失败：${pushError}`, error: true }
-          : { message: label + '完成', error: false },
+          ? { message: t('Local commit completed, but the push failed: {0}', pushError), error: true }
+          : { message: t('{0} completed', label), error: false },
       );
     } catch (error) {
       setNotice({ message: (error as Error).message, error: true });
@@ -753,17 +764,22 @@ function App() {
     setSelected(new Set(paths));
     if (!currentDraft.trim()) {
       commitInput.current?.focus();
-      setNotice({ message: '请先填写提交说明。', error: true });
+      setNotice({ message: t('Enter a commit message first.'), error: true });
       return;
     }
     const chosen = new Set(paths);
     if (changes.some((change) => change.status === 'conflict' && chosen.has(change.path))) {
-      setNotice({ message: '请先解决所有冲突。', error: true });
+      setNotice({ message: t('Resolve all conflicts first.'), error: true });
       return;
     }
-    void perform('commit', { paths, message: currentDraft, push }, push ? '提交并推送' : '提交', () => {
-      setDrafts((previous) => ({ ...previous, [snapshot!.repository!.path]: '' }));
-    });
+    void perform(
+      'commit',
+      { paths, message: currentDraft, push },
+      push ? t('Commit & Push') : t('Commit'),
+      () => {
+        setDrafts((previous) => ({ ...previous, [snapshot!.repository!.path]: '' }));
+      },
+    );
   };
   const commit = (push = false) => commitPaths([...selected], push);
   useEffect(() => {
@@ -819,12 +835,12 @@ function App() {
     return [
       {
         id: 'conflicts',
-        name: '合并冲突',
+        name: t('Merge Conflicts'),
         files: filteredChanges.filter((change) => change.status === 'conflict'),
       },
       {
         id: 'default',
-        name: '默认更改列表',
+        name: t('Default Changelist'),
         files: filteredChanges.filter(
           (change) =>
             change.status !== 'untracked' && change.status !== 'conflict' && !listed.has(change.path),
@@ -839,7 +855,7 @@ function App() {
       })),
       {
         id: 'untracked',
-        name: '未版本化的文件',
+        name: t('Unversioned Files'),
         files: filteredChanges.filter((change) => change.status === 'untracked' && !listed.has(change.path)),
       },
     ].filter((group) => group.files.length || (!['conflicts', 'untracked'].includes(group.id) && !fileQuery));
@@ -908,13 +924,13 @@ function App() {
     const alreadyStaged = targets.length > 0 && targets.every((change) => stageState(change) === 'staged');
     return [
       {
-        label: paths.length > 1 ? `添加到 Git（${paths.length} 个文件）` : '添加到 Git',
+        label: paths.length > 1 ? t('Add {0} files to Git', paths.length) : t('Add to Git'),
         icon: <Plus size={14} />,
         disabled: isBusy || !targets.length || conflict || alreadyStaged,
-        run: () => void perform('stage', { paths }, '添加到 Git'),
+        run: () => void perform('stage', { paths }, t('Add to Git')),
       },
       {
-        label: '提交所选文件…',
+        label: t('Commit Selected Files…'),
         icon: <GitCommitHorizontal size={14} />,
         separator: true,
         disabled: isBusy || !targets.length || conflict || !!snapshot?.operation,
@@ -961,19 +977,19 @@ function App() {
   const [logStart, logEnd] = uniformRange(visibleCommits.length, COMMIT_ROW_HEIGHT, logViewport);
   const repositoryOptions = useMemo<SelectOption[]>(() => {
     const list: SelectOption[] = [];
-    if (!snapshot?.repository) list.push({ value: '', label: '选择仓库' });
+    if (!snapshot?.repository) list.push({ value: '', label: t('Select repository') });
     for (const repo of snapshot?.repositories ?? [])
       list.push({ value: repo.path, label: repo.name, title: repo.path });
-    list.push({ value: '__pick', label: '打开其他仓库…', separator: true });
+    list.push({ value: '__pick', label: t('Open another repository…'), separator: true });
     return list;
   }, [snapshot?.repository, snapshot?.repositories]);
   const branchFilterOptions = useMemo<SelectOption[]>(
     () => [
-      { value: '', label: '所有分支' },
+      { value: '', label: t('All branches') },
       ...(snapshot?.branches ?? []).map((branch) => ({
         value: branch.name,
         label: branch.name,
-        title: branch.remote ? `远程分支 ${branch.name}` : branch.name,
+        title: branch.remote ? t('Remote branch {0}', branch.name) : branch.name,
       })),
     ],
     [snapshot?.branches],
@@ -984,7 +1000,7 @@ function App() {
       void perform(
         'openDiff',
         { path: diffFile, ...(view === 'log' ? { commit: activeCommit } : {}) },
-        '打开 Diff',
+        t('Open Diff'),
       );
   };
   const closeBranchDropdown = () => {
@@ -1017,26 +1033,30 @@ function App() {
     const locked = isBusy || !!snapshot?.operation;
     const actions: MenuAction[] = [
       {
-        label: branch.current ? '当前分支' : branch.remote ? '检出并跟踪远程分支' : '检出分支',
+        label: branch.current
+          ? t('Current branch')
+          : branch.remote
+            ? t('Check out and track remote branch')
+            : t('Check out branch'),
         icon: <Check size={14} />,
         disabled: locked || branch.current,
-        run: () => void perform('checkout', params, '切换分支', () => setDialog(null)),
+        run: () => void perform('checkout', params, t('Switch Branch'), () => setDialog(null)),
       },
       {
-        label: '从此分支新建并切换…',
+        label: t('Create and switch from this branch…'),
         icon: <Plus size={14} />,
         disabled: locked,
         run: () => showDialog({ type: 'newBranch', branch }),
       },
       {
-        label: '与当前分支比较…',
+        label: t('Compare with current branch…'),
         icon: <GitCompareArrows size={14} />,
         disabled: isBusy || branch.current,
         separator: true,
         run: () => showDialog({ type: 'compare', branch }),
       },
       {
-        label: '显示此分支历史',
+        label: t('Show history for this branch'),
         icon: <History size={14} />,
         run: () => {
           setBranchFilter(branch.name);
@@ -1045,30 +1065,30 @@ function App() {
         },
       },
       {
-        label: `从 ${branch.name} 分支合并到当前分支`,
+        label: t('Merge {0} into the current branch', branch.name),
         icon: <GitMerge size={14} />,
         disabled: locked || branch.current,
         separator: true,
-        run: () => void perform('merge', params, '合并分支', () => setDialog(null)),
+        run: () => void perform('merge', params, t('Merge Branch'), () => setDialog(null)),
       },
       {
-        label: `将当前分支 Rebase 到 ${branch.name} 分支`,
+        label: t('Rebase current branch onto {0}', branch.name),
         icon: <GitFork size={14} />,
         disabled: locked || branch.current || snapshot?.detached,
-        run: () => void perform('rebase', params, 'Rebase', () => setDialog(null)),
+        run: () => void perform('rebase', params, t('Rebase'), () => setDialog(null)),
       },
     ];
     if (!branch.remote)
       actions.push(
         {
-          label: '重命名分支…',
+          label: t('Rename branch…'),
           icon: <Settings2 size={14} />,
           disabled: locked,
           separator: true,
           run: () => showDialog({ type: 'renameBranch', branch }),
         },
         {
-          label: '设置上游分支…',
+          label: t('Set upstream branch…'),
           icon: <Box size={14} />,
           disabled: locked,
           run: () => showDialog({ type: 'upstream', branch }),
@@ -1077,14 +1097,14 @@ function App() {
     if (branch.current)
       actions.push(
         {
-          label: '拉取并更新当前分支',
+          label: t('Pull and update current branch'),
           icon: <ArrowDownToLine size={14} />,
           disabled: locked || !snapshot?.upstream,
           separator: true,
-          run: () => void perform('pull', {}, '更新项目', () => setDialog(null)),
+          run: () => void perform('pull', {}, t('Update Project'), () => setDialog(null)),
         },
         {
-          label: '推送当前分支…',
+          label: t('Push current branch…'),
           icon: <ArrowUpFromLine size={14} />,
           disabled: locked,
           run: () => showDialog({ type: 'push' }),
@@ -1092,18 +1112,18 @@ function App() {
       );
     actions.push(
       {
-        label: '复制分支名称',
+        label: t('Copy branch name'),
         icon: <Code2 size={14} />,
         separator: true,
-        run: () => void perform('copyBranch', params, '复制分支名称'),
+        run: () => void perform('copyBranch', params, t('Copy Branch Name')),
       },
       {
-        label: branch.remote ? '删除远程分支…' : '删除分支…',
+        label: branch.remote ? t('Delete remote branch…') : t('Delete branch…'),
         icon: <Trash2 size={14} />,
         disabled: locked || branch.current,
         danger: true,
         run: () =>
-          void perform('deleteBranch', { name: branch.name, remote: branch.remote }, '删除分支', () =>
+          void perform('deleteBranch', { name: branch.name, remote: branch.remote }, t('Delete Branch'), () =>
             setDialog(null),
           ),
       },
@@ -1114,24 +1134,24 @@ function App() {
     const locked = isBusy || !!snapshot?.operation;
     return [
       {
-        label: '优选提交（Cherry-pick）',
+        label: t('Cherry-pick commit'),
         icon: <GitCommitHorizontal size={14} />,
         disabled: locked,
-        run: () => void perform('cherryPick', { hash: target.hash }, 'Cherry-pick'),
+        run: () => void perform('cherryPick', { hash: target.hash }, t('Cherry-pick')),
       },
       {
-        label: '还原提交（Revert）',
+        label: t('Revert commit'),
         icon: <Undo2 size={14} />,
         disabled: locked,
-        run: () => void perform('revert', { hash: target.hash }, '还原提交'),
+        run: () => void perform('revert', { hash: target.hash }, t('Revert Commit')),
       },
       {
-        label: '强制重置当前分支到此提交…',
+        label: t('Hard reset current branch to this commit…'),
         icon: <RefreshCw size={14} />,
         disabled: locked || snapshot?.detached,
         separator: true,
         danger: true,
-        run: () => void perform('reset', { hash: target.hash }, '强制重置'),
+        run: () => void perform('reset', { hash: target.hash }, t('Hard Reset')),
       },
     ];
   };
@@ -1154,14 +1174,18 @@ function App() {
     >
       <button
         className="branch-name"
-        title={`${branch.name}\n${branch.subject}\n单击查看历史，右键进行分支操作，双击检出`}
+        title={t(
+          '{0}\n{1}\nClick to view history, right-click for branch actions, double-click to check out',
+          branch.name,
+          branch.subject,
+        )}
         onClick={() => {
           setBranchFilter(branch.name);
           setView('log');
         }}
         onDoubleClick={() => {
           if (!branch.current && !isBusy)
-            void perform('checkout', { branch: branch.name, remote: branch.remote }, '切换分支');
+            void perform('checkout', { branch: branch.name, remote: branch.remote }, t('Switch Branch'));
         }}
       >
         <GitBranch size={14} />
@@ -1170,8 +1194,8 @@ function App() {
       </button>
       <button
         className="icon-button"
-        title={`操作分支 ${branch.name}`}
-        aria-label={`操作分支 ${branch.name}`}
+        title={t('Branch actions for {0}', branch.name)}
+        aria-label={t('Branch actions for {0}', branch.name)}
         onClick={(event) => {
           const rect = event.currentTarget.getBoundingClientRect();
           openBranchMenu(branch, rect.right, rect.bottom);
@@ -1196,7 +1220,7 @@ function App() {
           className="branch-section branch-folder-heading"
           style={{ paddingLeft: 8 + depth * 12 }}
           aria-expanded={open}
-          title={`${open ? '折叠' : '展开'}分支分组 ${folder.path}`}
+          title={t(open ? 'Collapse branch group {0}' : 'Expand branch group {0}', folder.path)}
           onClick={() => toggleBranchFolder(key)}
         >
           {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -1227,7 +1251,7 @@ function App() {
         <button
           className={`branch-section branch-folder-heading${scope === 'remote' ? ' remote-heading' : ''}`}
           aria-expanded={open}
-          title={`${open ? '折叠' : '展开'}${title}分支`}
+          title={t(open ? 'Collapse {0} branches' : 'Expand {0} branches', title)}
           onClick={() => toggleBranchFolder(scope)}
         >
           {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
@@ -1252,13 +1276,13 @@ function App() {
         <div className="repo-selector">
           <FolderGit2 size={16} />
           <SelectMenu
-            ariaLabel="选择仓库"
-            placeholder="选择仓库"
+            ariaLabel={t('Select repository')}
+            placeholder={t('Select repository')}
             value={snapshot?.repository?.path || ''}
             options={repositoryOptions}
             menuMinWidth={240}
             onChange={(value) => {
-              if (value === '__pick') void perform('pickRepository', {}, '选择仓库');
+              if (value === '__pick') void perform('pickRepository', {}, t('Select Repository'));
               else if (value) void refresh(value);
             }}
             disabled={isBusy || refreshing}
@@ -1279,7 +1303,7 @@ function App() {
                 setBranchDropdown(trigger);
               }}
               disabled={!snapshot?.repository}
-              title="切换、合并或新建分支"
+              title={t('Switch, merge, or create a branch')}
               aria-haspopup="dialog"
               aria-expanded={!!branchDropdown}
               onContextMenu={(event) => {
@@ -1289,13 +1313,14 @@ function App() {
               }}
             >
               <GitBranch size={13} />
-              <span>{snapshot?.branch || '未打开仓库'}</span>
+              <span>{snapshot?.branch || t('No repository open')}</span>
               <ChevronDown size={11} />
             </button>
-            <nav className="panel-tabs" aria-label="Git 视图">
+            <nav className="panel-tabs" aria-label={t('Git views')}>
               <button className={view === 'changes' ? 'selected' : ''} onClick={() => setView('changes')}>
                 <ListChecks size={14} />
-                更改<span>{changes.length}</span>
+                {t('Changes')}
+                <span>{changes.length}</span>
               </button>
               <button
                 className={view === 'log' ? 'selected' : ''}
@@ -1305,7 +1330,7 @@ function App() {
                 }}
               >
                 <History size={14} />
-                历史
+                {t('History')}
               </button>
               <button className={view === 'stash' ? 'selected' : ''} onClick={() => setView('stash')}>
                 <Layers size={14} />
@@ -1314,25 +1339,26 @@ function App() {
             </nav>
           </>
         )}
-        {isPreview && <span className="preview-badge">交互预览 · 示例仓库</span>}
+        {isPreview && <span className="preview-badge">{t('Interactive preview · Sample repository')}</span>}
         <div className="spacer" />
         <button
           className="toolbar-button"
           disabled={isBusy || !snapshot?.remotes.length}
-          title="获取所有远程仓库的最新信息"
-          onClick={() => void perform('fetch', {}, '获取远程更新')}
+          title={t('Fetch the latest information from all remotes')}
+          onClick={() => void perform('fetch', {}, t('Fetch Updates'))}
         >
           <RefreshCw size={14} />
-          获取
+          {t('Fetch')}
         </button>
         <button
           className="toolbar-button"
           disabled={isBusy || !snapshot?.upstream}
-          title="更新项目"
-          onClick={() => void perform('pull', {}, '更新项目')}
+          title={t('Update Project')}
+          onClick={() => void perform('pull', {}, t('Update Project'))}
         >
           <ArrowDownToLine size={15} />
-          拉取{snapshot?.behind ? <span className="count">{snapshot.behind}</span> : null}
+          {t('Pull')}
+          {snapshot?.behind ? <span className="count">{snapshot.behind}</span> : null}
         </button>
         <button
           className="button push-button"
@@ -1340,25 +1366,30 @@ function App() {
           onClick={() => showDialog({ type: 'push' })}
         >
           <ArrowUpFromLine size={14} />
-          推送{snapshot?.ahead ? <span>{snapshot.ahead}</span> : null}
+          {t('Push')}
+          {snapshot?.ahead ? <span>{snapshot.ahead}</span> : null}
         </button>
-        <IconButton title="刷新工作台" disabled={isBusy || refreshing} onClick={() => void refresh()}>
+        <IconButton
+          title={t('Refresh workbench')}
+          disabled={isBusy || refreshing}
+          onClick={() => void refresh()}
+        >
           <RefreshCw size={16} className={refreshing ? 'spin' : ''} />
         </IconButton>
-        <IconButton title="使用指南与快捷键" onClick={() => showDialog({ type: 'help' })}>
+        <IconButton title={t('Guide and keyboard shortcuts')} onClick={() => showDialog({ type: 'help' })}>
           <BookOpen size={16} />
         </IconButton>
       </header>
       <div className="workspace-body">
         <aside className="sidebar">
           <div className="workspace-caption">
-            工作区
+            {t('Workspace')}
             <span className="caption-dot" />
           </div>
-          <nav className="main-nav" aria-label="Git 导航">
+          <nav className="main-nav" aria-label={t('Git navigation')}>
             <button className={view === 'changes' ? 'selected' : ''} onClick={() => setView('changes')}>
               <ListChecks size={17} />
-              <span>本地更改</span>
+              <span>{t('Local Changes')}</span>
               <b>{changes.length}</b>
             </button>
             <button
@@ -1369,7 +1400,7 @@ function App() {
               }}
             >
               <History size={17} />
-              <span>提交历史</span>
+              <span>{t('Commit History')}</span>
             </button>
             <button className={view === 'stash' ? 'selected' : ''} onClick={() => setView('stash')}>
               <Layers size={17} />
@@ -1379,9 +1410,9 @@ function App() {
           </nav>
           <div className="sidebar-rule" />
           <div className="branch-heading">
-            <span>分支</span>
+            <span>{t('Branches')}</span>
             <IconButton
-              title={branchGrouped ? '切换为平铺分支列表' : '按前缀分组分支'}
+              title={branchGrouped ? t('Toggle flat branch list') : t('Group branches by prefix')}
               className={branchGrouped ? 'active' : ''}
               disabled={!snapshot?.repository}
               onClick={() => setBranchGrouped((value) => !value)}
@@ -1389,7 +1420,7 @@ function App() {
               <ListTree size={15} />
             </IconButton>
             <IconButton
-              title="新建分支"
+              title={t('New branch')}
               disabled={isBusy || !snapshot?.repository || !snapshot.commits.length}
               onClick={() => showDialog({ type: 'newBranch' })}
             >
@@ -1399,8 +1430,8 @@ function App() {
           <label className="search-box branch-search">
             <Search size={13} />
             <input
-              aria-label="搜索分支"
-              placeholder="搜索分支…"
+              aria-label={t('Search branches')}
+              placeholder={t('Search branches…')}
               value={branchQuery}
               onChange={(event) => {
                 setBranchQuery(event.target.value);
@@ -1410,15 +1441,17 @@ function App() {
             <kbd>⌕</kbd>
           </label>
           <div className="branches-scroll">
-            {branchSection('local', '本地', localBranches)}
-            {branchSection('remote', '远程', remoteBranches)}
+            {branchSection('local', t('local'), localBranches)}
+            {branchSection('remote', t('remote'), remoteBranches)}
             {!localBranches.length && !remoteBranches.length && (
-              <p className="sidebar-empty">{branchQuery ? '没有匹配的分支' : '首次提交后会显示分支'}</p>
+              <p className="sidebar-empty">
+                {branchQuery ? t('No matching branches') : t('Branches appear after the first commit')}
+              </p>
             )}
           </div>
         </aside>
         <ResizeHandle
-          label="调整分支栏宽度"
+          label={t('Resize branch pane')}
           className="sidebar-resize"
           target=".sidebar"
           value={sizes.sidebar}
@@ -1433,45 +1466,56 @@ function App() {
               <GitMerge size={16} />
               <span>
                 {snapshot?.rebasing
-                  ? 'Rebase 进行中'
+                  ? t('Rebase in progress')
                   : snapshot?.merging
-                    ? '合并进行中'
+                    ? t('Merge in progress')
                     : snapshot?.operation === 'cherry-pick'
-                      ? 'Cherry-pick 进行中'
+                      ? t('Cherry-pick in progress')
                       : snapshot?.operation === 'revert'
-                        ? 'Revert 进行中'
-                        : 'Git 操作存在冲突'}{' '}
-                · 解决冲突后标记为已解决，再继续操作。
+                        ? t('Revert in progress')
+                        : t('Git operation has conflicts')}{' '}
+                · {t('Resolve conflicts, mark them as resolved, then continue.')}
               </span>
-              <button disabled={isBusy} onClick={() => void perform('continueOperation', {}, '继续操作')}>
-                继续
+              <button
+                disabled={isBusy}
+                onClick={() => void perform('continueOperation', {}, t('Continue Operation'))}
+              >
+                {t('Continue')}
               </button>
-              <button disabled={isBusy} onClick={() => void perform('abortOperation', {}, '中止操作')}>
-                中止
+              <button
+                disabled={isBusy}
+                onClick={() => void perform('abortOperation', {}, t('Abort Operation'))}
+              >
+                {t('Abort')}
               </button>
             </div>
           )}
           {!snapshot ? (
-            <Empty icon={<LoaderCircle size={32} className="spin" />} title="正在连接 Git 仓库…" />
+            <Empty
+              icon={<LoaderCircle size={32} className="spin" />}
+              title={t('Connecting to Git repository…')}
+            />
           ) : !snapshot.repository ? (
             <Empty
               icon={<FolderGit2 size={42} />}
-              title="从一个 Git 仓库开始"
-              detail="打开已有仓库，即可按熟悉的方式管理更改、分支和提交。"
+              title={t('Start with a Git repository')}
+              detail={t(
+                "Open an existing repository to manage changes, branches, and commits the way you're used to.",
+              )}
             >
               <button
                 className="button primary"
                 disabled={isBusy}
-                onClick={() => void perform('pickRepository', {}, '打开仓库')}
+                onClick={() => void perform('pickRepository', {}, t('Open Repository'))}
               >
                 <FolderClosed size={15} />
-                打开仓库
+                {t('Open Repository')}
               </button>
             </Empty>
           ) : view === 'changes' ? (
             <div className="changes-workspace">
               <ResizeHandle
-                label="调整文件列表宽度"
+                label={t('Resize file list')}
                 min={150}
                 target=".file-list"
                 value={sizes.files}
@@ -1481,7 +1525,7 @@ function App() {
                 style={{ left: 'var(--file-width)' }}
               />
               <ResizeHandle
-                label="调整提交栏宽度"
+                label={t('Resize commit panel')}
                 min={180}
                 target=".commit-panel"
                 side="right"
@@ -1491,30 +1535,31 @@ function App() {
                 reserve=".file-list"
                 style={{ right: 'var(--commit-width)' }}
               />
-              <section className="changes-panel" aria-label="本地更改列表">
+              <section className="changes-panel" aria-label={t('Local changes list')}>
                 <div className="panel-toolbar">
                   <span className="panel-title">
-                    更改<span className="count">{changes.length}</span>
+                    {t('Changes')}
+                    <span className="count">{changes.length}</span>
                   </span>
                   <div className="spacer" />
                   <IconButton
-                    title="新建更改列表"
+                    title={t('New changelist')}
                     disabled={isBusy}
                     onClick={() => showDialog({ type: 'changelist' })}
                   >
                     <Plus size={15} />
                   </IconButton>
                   <IconButton
-                    title="移动勾选文件到更改列表"
+                    title={t('Move checked files to a changelist')}
                     disabled={!selected.size || isBusy}
                     onClick={() => showDialog({ type: 'move' })}
                   >
                     <FolderClosed size={14} />
                   </IconButton>
                   <IconButton
-                    title="回滚勾选的更改"
+                    title={t('Discard checked changes')}
                     disabled={!selected.size || isBusy}
-                    onClick={() => void perform('discard', { paths: selectedFiles }, '回滚更改')}
+                    onClick={() => void perform('discard', { paths: selectedFiles }, t('Discard Changes'))}
                   >
                     <Undo2 size={14} />
                   </IconButton>
@@ -1522,13 +1567,13 @@ function App() {
                 <label className="search-box file-search">
                   <Search size={14} />
                   <input
-                    aria-label="搜索更改文件"
-                    placeholder="按文件名筛选…"
+                    aria-label={t('Search changed files')}
+                    placeholder={t('Filter by file name…')}
                     value={fileQuery}
                     onChange={(event) => setFileQuery(event.target.value)}
                   />
                   {fileQuery && (
-                    <button aria-label="清除文件筛选" onClick={() => setFileQuery('')}>
+                    <button aria-label={t('Clear file filter')} onClick={() => setFileQuery('')}>
                       <X size={13} />
                     </button>
                   )}
@@ -1537,11 +1582,11 @@ function App() {
                   {!changes.length ? (
                     <Empty
                       icon={<CircleCheck size={32} />}
-                      title="工作区很干净"
-                      detail="新的改动会出现在这里。"
+                      title={t('Working tree is clean')}
+                      detail={t('New changes will appear here.')}
                     />
                   ) : !filteredChanges.length ? (
-                    <Empty icon={<Search size={26} />} title="没有匹配的文件" />
+                    <Empty icon={<Search size={26} />} title={t('No matching files')} />
                   ) : (
                     <div
                       style={{
@@ -1556,7 +1601,10 @@ function App() {
                             <div className="group-heading" key={`group:${group.id}`}>
                               <button
                                 className="collapse-button"
-                                aria-label={`${collapsed.has(group.id) ? '展开' : '折叠'} ${group.name}`}
+                                aria-label={t(
+                                  collapsed.has(group.id) ? 'Expand {0}' : 'Collapse {0}',
+                                  group.name,
+                                )}
                                 onClick={() =>
                                   setCollapsed((previous) => {
                                     const next = new Set(previous);
@@ -1573,7 +1621,7 @@ function App() {
                               </button>
                               <input
                                 type="checkbox"
-                                aria-label={`选择 ${group.name}`}
+                                aria-label={t('Select {0}', group.name)}
                                 ref={(element) => {
                                   if (element)
                                     element.indeterminate =
@@ -1590,16 +1638,16 @@ function App() {
                               />
                               <span className={group.id === 'conflicts' ? 'red' : ''}>{group.name}</span>
                               <small>{group.files.length}</small>
-                              {group.id === 'default' && <span className="default-tag">默认</span>}
+                              {group.id === 'default' && <span className="default-tag">{t('Default')}</span>}
                               {!['default', 'conflicts', 'untracked'].includes(group.id) && (
                                 <IconButton
-                                  title={`删除更改列表 ${group.name}`}
+                                  title={t('Delete changelist {0}', group.name)}
                                   disabled={isBusy}
                                   onClick={() =>
                                     void perform(
                                       'changelist',
                                       { action: 'delete', id: group.id },
-                                      '删除更改列表',
+                                      t('Delete Changelist'),
                                     )
                                   }
                                 >
@@ -1629,7 +1677,7 @@ function App() {
                           >
                             <input
                               type="checkbox"
-                              aria-label={`选择文件 ${change.path}`}
+                              aria-label={t('Select file {0}', change.path)}
                               checked={selected.has(change.path)}
                               disabled={isBusy || change.status === 'conflict'}
                               onChange={() => toggle(change.path)}
@@ -1637,7 +1685,7 @@ function App() {
                             <button
                               className="file-select"
                               data-path={change.path}
-                              title={`${change.path}\n${statusLabels[change.status]}${stage ? `\n${stage === 'staged' ? '修改已全部暂存' : '已暂存部分修改，工作区还有未暂存修改'}` : ''}\nShift / ${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'} 点击可多选`}
+                              title={`${change.path}\n${statusLabels[change.status]}${stage ? `\n${stage === 'staged' ? t('All changes are staged') : t('Some changes are staged; the working tree has unstaged changes')}` : ''}\n${t('Shift / {0} click to select multiple', navigator.platform.includes('Mac') ? '⌘' : 'Ctrl')}`}
                               onClick={(event) => selectFileRow(change.path, event)}
                               onKeyDown={(event) => {
                                 if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
@@ -1669,29 +1717,29 @@ function App() {
                                 else selectFileRow(path);
                               }}
                               onDoubleClick={() =>
-                                void perform('openDiff', { path: change.path }, '打开 Diff')
+                                void perform('openDiff', { path: change.path }, t('Open Diff'))
                               }
                             >
                               <FileIcon file={change.path} />
                               <span className="file-label">
                                 <strong>{basename(change.path)}</strong>
-                                <small>{dirname(change.path) || '项目根目录'}</small>
+                                <small>{dirname(change.path) || t('Project root')}</small>
                               </span>
                               {stage && (
                                 <span
                                   className={`stage-badge ${stage}`}
                                   title={
                                     stage === 'staged'
-                                      ? '该文件的修改已全部暂存'
-                                      : '已暂存部分修改，工作区还有未暂存修改'
+                                      ? t('This file is fully staged')
+                                      : t('Some changes are staged; the working tree has unstaged changes')
                                   }
                                 >
-                                  {stage === 'staged' ? '已暂存' : '部分暂存'}
+                                  {stage === 'staged' ? t('Staged') : t('Partially staged')}
                                 </span>
                               )}
                               <span
                                 className={`file-status ${change.status}`}
-                                title={`状态：${statusLabels[change.status]}`}
+                                title={t('Status: {0}', statusLabels[change.status])}
                               >
                                 {statusLetters[change.status]}
                               </span>
@@ -1704,8 +1752,8 @@ function App() {
                 </div>
                 <div className="selection-summary">
                   <span>
-                    已勾选 <b>{selected.size}</b> / {changes.length} 个文件
-                    {fileSelection.size > 1 && <em> · 已选 {fileSelection.size}</em>}
+                    {t('Selected {0} of {1} files', selected.size, changes.length)}
+                    {fileSelection.size > 1 && <em> · {t('Selected: {0}', fileSelection.size)}</em>}
                   </span>
                   <span className="diff-stat">
                     <b>+{totalAdded}</b>
@@ -1715,13 +1763,15 @@ function App() {
                 <div className="commit-panel">
                   <div className="commit-heading">
                     <GitCommitHorizontal size={16} />
-                    <strong>提交更改</strong>
+                    <strong>{t('Commit changes')}</strong>
                     <span>COMMIT</span>
                   </div>
                   <textarea
                     ref={commitInput}
-                    aria-label="提交说明"
-                    placeholder={'写下这次更改的目的…\n\n例如：feat: 添加全局命令面板'}
+                    aria-label={t('Commit message')}
+                    placeholder={t(
+                      'Describe the purpose of this change…\n\nFor example: feat: add a command palette',
+                    )}
                     value={currentDraft}
                     onChange={(event) =>
                       setDrafts((previous) => ({
@@ -1734,7 +1784,7 @@ function App() {
                   <div className="commit-caption">
                     <span>
                       <CheckCheck size={13} />
-                      仅提交勾选文件的全部改动
+                      {t('Only commits all changes in checked files')}
                     </span>
                     <span>{currentDraft.split('\n')[0].length}/72</span>
                   </div>
@@ -1744,12 +1794,13 @@ function App() {
                       disabled={isBusy || !selected.size || !currentDraft.trim() || !!snapshot.operation}
                       onClick={() => commit()}
                     >
-                      {busy.startsWith('提交') ? (
+                      {busy.startsWith(t('Commit')) ? (
                         <LoaderCircle size={14} className="spin" />
                       ) : (
                         <Check size={14} />
                       )}
-                      提交{selected.size ? <span>{selected.size}</span> : null}
+                      {t('Commit')}
+                      {selected.size ? <span>{selected.size}</span> : null}
                     </button>
                     <button
                       className="button"
@@ -1763,17 +1814,17 @@ function App() {
                       }
                       onClick={() => commit(true)}
                     >
-                      提交并推送
+                      {t('Commit & Push')}
                       <ArrowUpRightIcon />
                     </button>
                   </div>
                   <div className="keyboard-hint">
                     <kbd>{navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'}</kbd>
                     <kbd>↵</kbd>
-                    <span>提交更改</span>
+                    <span>{t('Commit changes')}</span>
                     <button
                       disabled={isBusy || !changes.length}
-                      title="暂存所有本地更改（包含未跟踪文件）"
+                      title={t('Stash all local changes, including untracked files')}
                       onClick={() => showDialog({ type: 'stash' })}
                     >
                       <Layers size={12} />
@@ -1784,19 +1835,23 @@ function App() {
               </section>
               {changes.find((change) => change.path === activeFile)?.status === 'conflict' ? (
                 <div className="conflict-view">
-                  <Empty icon={<GitMerge size={42} />} title="此文件存在合并冲突" detail={activeFile}>
+                  <Empty
+                    icon={<GitMerge size={42} />}
+                    title={t('This file has merge conflicts')}
+                    detail={activeFile}
+                  >
                     <button
                       className="button primary"
-                      onClick={() => void perform('resolve', { path: activeFile }, '打开合并编辑器')}
+                      onClick={() => void perform('resolve', { path: activeFile }, t('Open Merge Editor'))}
                     >
-                      打开三方合并编辑器
+                      {t('Open 3-way Merge Editor')}
                     </button>
                     <button
                       className="button"
                       disabled={isBusy}
-                      onClick={() => void perform('markResolved', { path: activeFile }, '标记已解决')}
+                      onClick={() => void perform('markResolved', { path: activeFile }, t('Mark Resolved'))}
                     >
-                      标记为已解决
+                      {t('Mark as Resolved')}
                     </button>
                   </Empty>
                 </div>
@@ -1831,7 +1886,7 @@ function App() {
             <div className="history-workspace">
               <div className="history-upper">
                 <ResizeHandle
-                  label="调整提交详情宽度"
+                  label={t('Resize commit details')}
                   min={180}
                   target=".commit-detail"
                   side="right"
@@ -1846,35 +1901,35 @@ function App() {
                     <label className="search-box log-search">
                       <Search size={14} />
                       <input
-                        aria-label="搜索提交"
-                        placeholder="搜索提交、作者或 Hash…"
+                        aria-label={t('Search commits')}
+                        placeholder={t('Search commits, authors, or hashes…')}
                         value={logQuery}
                         onChange={(event) => setLogQuery(event.target.value)}
                       />
                     </label>
                     <SelectMenu
-                      ariaLabel="筛选分支历史"
+                      ariaLabel={t('Filter branch history')}
                       className="filter-select"
                       value={branchFilter}
                       options={branchFilterOptions}
                       menuMinWidth={220}
                       onChange={setBranchFilter}
                     />
-                    <span className="history-count">{visibleCommits.length} 次提交</span>
+                    <span className="history-count">{t('Commits: {0}', visibleCommits.length)}</span>
                   </div>
                   <div className="log-table-header">
-                    <span style={{ width: graph.width }}>提交图</span>
-                    <span className="log-subject">提交说明</span>
-                    <span className="log-author">作者</span>
+                    <span style={{ width: graph.width }}>{t('Commit graph')}</span>
+                    <span className="log-subject">{t('Subject')}</span>
+                    <span className="log-author">{t('Author')}</span>
                     <span className="log-hash">Hash</span>
-                    <span className="log-date">时间</span>
+                    <span className="log-date">{t('Date')}</span>
                   </div>
                   <div className="log-scroll" ref={logViewport.ref}>
                     {!visibleCommits.length ? (
                       <Empty
                         icon={<History size={32} />}
-                        title={logQuery || branchFilter ? '没有匹配的提交' : '还没有提交'}
-                        detail="完成第一次提交后，历史会显示在这里。"
+                        title={logQuery || branchFilter ? t('No matching commits') : t('No commits yet')}
+                        detail={t('History will appear here after the first commit.')}
                       />
                     ) : (
                       <div className="log-table">
@@ -1951,7 +2006,10 @@ function App() {
                               const rect = event.currentTarget.getBoundingClientRect();
                               openCommitMenu(commit, rect.left + 24, rect.bottom);
                             }}
-                            title={`${commit.subject}\n右键或 Shift+F10 打开提交操作`}
+                            title={t(
+                              '{0}\nRight-click or press Shift+F10 for commit actions',
+                              commit.subject,
+                            )}
                           >
                             <span style={{ width: graph.width }} />
                             <span className="log-subject">
@@ -1988,7 +2046,7 @@ function App() {
                   </div>
                   <div className="history-footnote">
                     <Circle size={10} />
-                    <span>最近 {snapshot.commits.length} 次提交 · 按拓扑顺序排列</span>
+                    <span>{t('Latest {0} commits · sorted topologically', snapshot.commits.length)}</span>
                     <div className="spacer" />
                     <button
                       onClick={() => {
@@ -1996,7 +2054,7 @@ function App() {
                         setBranchFilter('');
                       }}
                     >
-                      重置筛选
+                      {t('Reset filters')}
                     </button>
                   </div>
                 </section>
@@ -2005,7 +2063,7 @@ function App() {
                     <>
                       <div className="detail-title">
                         <GitCommitHorizontal size={16} />
-                        <strong>提交详情</strong>
+                        <strong>{t('Commit details')}</strong>
                         <code>{detail.commit.hash.slice(0, 8)}</code>
                       </div>
                       <h3>{detail.commit.subject}</h3>
@@ -2025,22 +2083,23 @@ function App() {
                         <button
                           className="button"
                           disabled={isBusy}
-                          title="把此提交应用到当前分支"
-                          onClick={() => void perform('cherryPick', { hash: activeCommit }, 'Cherry-pick')}
+                          title={t('Apply this commit to the current branch')}
+                          onClick={() => void perform('cherryPick', { hash: activeCommit }, t('Cherry-pick'))}
                         >
                           <GitCommitHorizontal size={13} />
                           Cherry-pick
                         </button>
                         <IconButton
-                          title="还原此提交（生成反向提交）"
+                          title={t('Revert this commit (creates an inverse commit)')}
                           disabled={isBusy}
-                          onClick={() => void perform('revert', { hash: activeCommit }, '还原提交')}
+                          onClick={() => void perform('revert', { hash: activeCommit }, t('Revert Commit'))}
                         >
                           <Undo2 size={14} />
                         </IconButton>
                       </div>
                       <div className="detail-files-heading">
-                        更改的文件<span>{detail.files.length}</span>
+                        {t('Changed files')}
+                        <span>{detail.files.length}</span>
                       </div>
                       <div className="detail-files">
                         {detail.files.map((file) => (
@@ -2059,12 +2118,14 @@ function App() {
                           </button>
                         ))}
                       </div>
-                      <p className="detail-tip">选择文件，在下方查看本次提交的差异。</p>
+                      <p className="detail-tip">
+                        {t('Select a file to view its changes from this commit below.')}
+                      </p>
                     </>
                   ) : (
                     <Empty
                       icon={<GitCommitHorizontal size={28} />}
-                      title={activeCommit ? '加载提交详情…' : '选择一个提交'}
+                      title={activeCommit ? t('Loading commit details…') : t('Select a commit')}
                     />
                   )}
                 </aside>
@@ -2085,7 +2146,7 @@ function App() {
           ) : (
             <div className="stash-workspace">
               <ResizeHandle
-                label="调整 Stash 列表宽度"
+                label={t('Resize Stash list')}
                 min={160}
                 target=".stash-list"
                 value={sizes.stash}
@@ -2095,11 +2156,11 @@ function App() {
               />
               <section className="stash-list">
                 <div className="panel-toolbar">
-                  <strong>已暂存的更改</strong>
+                  <strong>{t('Stashed changes')}</strong>
                   <span className="count">{snapshot.stashes.length}</span>
                   <div className="spacer" />
                   <IconButton
-                    title="暂存当前全部更改"
+                    title={t('Stash all current changes')}
                     disabled={isBusy || !changes.length}
                     onClick={() => showDialog({ type: 'stash' })}
                   >
@@ -2109,8 +2170,8 @@ function App() {
                 {!snapshot.stashes.length ? (
                   <Empty
                     icon={<Layers size={32} />}
-                    title="没有暂存的更改"
-                    detail="需要切换任务时，用 Stash 保存当前进度。"
+                    title={t('No stashed changes')}
+                    detail={t('Use Stash to save your progress when switching tasks.')}
                   />
                 ) : (
                   snapshot.stashes.map((stash) => (
@@ -2139,24 +2200,24 @@ function App() {
                     <button
                       className="button primary"
                       disabled={isBusy}
-                      onClick={() => void perform('stashApply', { ref: activeStash }, '应用 Stash')}
+                      onClick={() => void perform('stashApply', { ref: activeStash }, t('Apply Stash'))}
                     >
                       <ArrowDown size={14} />
-                      应用
+                      {t('Apply')}
                     </button>
                     <button
                       className="button"
                       disabled={isBusy}
                       onClick={() =>
-                        void perform('stashApply', { ref: activeStash, pop: true }, '应用并移除 Stash')
+                        void perform('stashApply', { ref: activeStash, pop: true }, t('Apply & Drop Stash'))
                       }
                     >
-                      应用并移除
+                      {t('Apply & Drop')}
                     </button>
                     <IconButton
-                      title="删除选中的 Stash"
+                      title={t('Delete selected stash')}
                       disabled={isBusy}
-                      onClick={() => void perform('stashDrop', { ref: activeStash }, '删除 Stash')}
+                      onClick={() => void perform('stashDrop', { ref: activeStash }, t('Delete Stash'))}
                     >
                       <Trash2 size={14} />
                     </IconButton>
@@ -2192,23 +2253,25 @@ function App() {
             <section className="console-panel">
               <div className="panel-toolbar">
                 <Terminal size={14} />
-                <strong>Git 控制台</strong>
+                <strong>{t('Git Console')}</strong>
                 <span className="count">{activities.length}</span>
                 <div className="spacer" />
-                <IconButton title="清空控制台" onClick={() => setActivities([])}>
+                <IconButton title={t('Clear console')} onClick={() => setActivities([])}>
                   <Trash2 size={13} />
                 </IconButton>
-                <IconButton title="关闭控制台" onClick={() => setConsoleOpen(false)}>
+                <IconButton title={t('Close console')} onClick={() => setConsoleOpen(false)}>
                   <X size={14} />
                 </IconButton>
               </div>
               <div className="console-scroll">
                 {!activities.length ? (
-                  <p className="muted">执行 Git 操作后，命令和结果会显示在这里。</p>
+                  <p className="muted">
+                    {t('Commands and results will appear here after you run Git operations.')}
+                  </p>
                 ) : (
                   activities.map((activity) => (
                     <div className={`console-entry ${activity.error ? 'error' : ''}`} key={activity.id}>
-                      <time>{new Date(activity.time).toLocaleTimeString('zh-CN', { hour12: false })}</time>
+                      <time>{new Date(activity.time).toLocaleTimeString(dateLocale, { hour12: false })}</time>
                       <div>
                         <code>$ {activity.command}</code>
                         {activity.output && <pre>{activity.output.trim()}</pre>}
@@ -2231,25 +2294,30 @@ function App() {
           <>
             <span className="online-dot" />
             <span>
-              {isPreview ? '示例仓库 · 交互预览' : snapshot?.repository ? '已连接本地仓库' : '等待打开仓库'}
+              {isPreview
+                ? t('Sample repository · Interactive preview')
+                : snapshot?.repository
+                  ? t('Connected to local repository')
+                  : t('Waiting for a repository')}
             </span>
           </>
         )}
         <div className="spacer" />
         <span className="status-hint">
-          {selected.size ? `${selected.size} 个文件待提交` : '所有更改，尽在掌握'}
+          {selected.size ? t('{0} files ready to commit', selected.size) : t('All changes under control')}
         </span>
         <button className={consoleOpen ? 'active' : ''} onClick={() => setConsoleOpen(!consoleOpen)}>
           <Terminal size={12} />
-          控制台{activities.some((activity) => activity.error) && <span className="error-dot" />}
+          {t('Console')}
+          {activities.some((activity) => activity.error) && <span className="error-dot" />}
         </button>
       </footer>
       {notice && (
         <div className={`toast ${notice.error ? 'error' : ''}`} role={notice.error ? 'alert' : 'status'}>
           {notice.error ? <Info size={18} /> : <CircleCheck size={18} />}
           <span>{notice.message}</span>
-          {notice.error && <button onClick={() => setConsoleOpen(true)}>查看控制台</button>}
-          <IconButton title="关闭提示" onClick={() => setNotice(null)}>
+          {notice.error && <button onClick={() => setConsoleOpen(true)}>{t('View console')}</button>}
+          <IconButton title={t('Dismiss notification')} onClick={() => setNotice(null)}>
             <X size={14} />
           </IconButton>
         </div>
@@ -2270,7 +2338,7 @@ function App() {
           x={commitMenu.x}
           y={commitMenu.y}
           title={`${commitMenu.commit.hash.slice(0, 8)} · ${commitMenu.commit.subject}`}
-          label={`提交 ${commitMenu.commit.hash.slice(0, 8)} 操作`}
+          label={t('Commit actions for {0}', commitMenu.commit.hash.slice(0, 8))}
           actions={commitActions(commitMenu.commit)}
           close={closeCommitMenu}
         />
@@ -2279,8 +2347,10 @@ function App() {
         <ContextMenu
           x={fileMenu.x}
           y={fileMenu.y}
-          title={fileMenu.paths.length > 1 ? `已选择 ${fileMenu.paths.length} 个文件` : fileMenu.paths[0]}
-          label={`文件操作：${fileMenu.paths.join('、')}`}
+          title={
+            fileMenu.paths.length > 1 ? t('Selected files: {0}', fileMenu.paths.length) : fileMenu.paths[0]
+          }
+          label={t('File actions: {0}', fileMenu.paths.join(', '))}
           actions={fileActions(fileMenu.paths)}
           close={closeFileMenu}
         />
@@ -2330,23 +2400,25 @@ function App() {
               </span>
               <h2
                 id="dialog-title"
-                title="拖动标题栏移动窗口，拖动边缘调整大小，双击标题栏恢复默认位置和大小"
+                title={t(
+                  'Drag the title bar to move, drag the edges to resize, and double-click the title bar to restore the default position and size',
+                )}
               >
                 {
                   {
-                    newBranch: '新建分支',
-                    renameBranch: '重命名分支',
-                    upstream: '设置上游分支',
-                    compare: '与当前分支比较',
-                    changelist: '新建更改列表',
-                    stash: '暂存本地更改',
-                    push: '推送提交',
-                    move: '移动到更改列表',
-                    help: '熟悉的 Git 工作方式',
+                    newBranch: t('New Branch'),
+                    renameBranch: t('Rename Branch'),
+                    upstream: t('Set Upstream Branch'),
+                    compare: t('Compare with Current Branch'),
+                    changelist: t('New Changelist'),
+                    stash: t('Stash Local Changes'),
+                    push: t('Push Commits'),
+                    move: t('Move to Changelist'),
+                    help: t('A Familiar Git Workflow'),
                   }[dialog.type]
                 }
               </h2>
-              <IconButton title="关闭对话框" disabled={isBusy} onClick={() => setDialog(null)}>
+              <IconButton title={t('Close dialog')} disabled={isBusy} onClick={() => setDialog(null)}>
                 <X size={18} />
               </IconButton>
             </div>
@@ -2359,8 +2431,13 @@ function App() {
                 </p>
                 <p className="modal-description">
                   {comparison
-                    ? `当前分支独有 ${comparison.ahead} 个提交，对方独有 ${comparison.behind} 个提交；${comparison.files.length} 个文件不同。`
-                    : '正在比较分支…'}
+                    ? t(
+                        'Current branch has {0} unique commits, the other branch has {1}; {2} files differ.',
+                        comparison.ahead,
+                        comparison.behind,
+                        comparison.files.length,
+                      )
+                    : t('Comparing branches…')}
                 </p>
                 <div className="comparison-files">
                   {comparison?.files.map((file) => (
@@ -2371,7 +2448,7 @@ function App() {
                         void perform(
                           'openBranchDiff',
                           { path: file.path, base: comparison.base, head: comparison.head },
-                          '打开分支比较',
+                          t('Open Branch Comparison'),
                         )
                       }
                     >
@@ -2381,14 +2458,14 @@ function App() {
                     </button>
                   ))}
                   {comparison && !comparison.files.length && (
-                    <p className="sidebar-empty">两个分支的文件内容一致</p>
+                    <p className="sidebar-empty">{t('The two branches have identical file contents')}</p>
                   )}
                 </div>
                 <div className="modal-footer">
-                  <span className="muted">选择文件，在 VS Code 差异编辑器中比较</span>
+                  <span className="muted">{t('Select a file to compare it in the VS Code diff editor')}</span>
                   <div className="spacer" />
                   <button className="button" onClick={() => setDialog(null)}>
-                    关闭
+                    {t('Close')}
                   </button>
                 </div>
               </>
@@ -2399,23 +2476,23 @@ function App() {
                   void perform(
                     'setUpstream',
                     { branch: dialog.branch!.name, upstream: dialogValue },
-                    '设置上游分支',
+                    t('Set Upstream Branch'),
                     () => setDialog(null),
                   );
                 }}
               >
                 <p className="modal-description">
-                  设置 <code>{dialog.branch?.name}</code> 的拉取和推送目标。
+                  {t('Set the pull and push target for {0}.', dialog.branch?.name ?? '')}
                 </p>
                 <div className="form-label">
-                  <span>上游分支</span>
+                  <span>{t('Upstream branch')}</span>
                   <SelectMenu
-                    ariaLabel="上游分支"
+                    ariaLabel={t('Upstream branch')}
                     value={dialogValue}
                     menuMinWidth={240}
                     onChange={setDialogValue}
                     options={[
-                      { value: '', label: '不跟踪上游' },
+                      { value: '', label: t('Do not track an upstream') },
                       ...(snapshot?.branches ?? [])
                         .filter((branch) => branch.remote)
                         .map((branch) => ({ value: branch.name, label: branch.name })),
@@ -2424,73 +2501,91 @@ function App() {
                 </div>
                 <div className="modal-footer">
                   <button className="button" type="button" onClick={() => setDialog(null)}>
-                    取消
+                    {t('Cancel')}
                   </button>
                   <button
                     className="button primary"
                     type="submit"
                     disabled={isBusy || (!dialogValue && !dialog.branch?.upstream)}
                   >
-                    保存
+                    {t('Save')}
                   </button>
                 </div>
               </form>
             ) : dialog.type === 'help' ? (
               <div className="help-content">
                 <p>
-                  围绕 IDEA 的日常工作流，把 Git
-                  操作放在一个工作台里。拖动分栏边界调整宽度，双击边界恢复默认；也可聚焦边界后使用左右方向键。
-                  对话框可拖动标题栏移动、拖动边缘调整大小，双击标题栏恢复默认。
+                  {t(
+                    'Bring your everyday IDEA workflow and Git operations together in one workbench. Drag pane boundaries to resize and double-click to reset; you can also focus a boundary and use the left and right arrow keys. Drag a dialog title bar to move it, drag its edges to resize, and double-click the title bar to reset.',
+                  )}
                 </p>
                 <ol>
                   <li>
-                    <b>选择更改</b>
-                    <span>勾选文件或整个更改列表；选择文件查看并排 Diff。</span>
+                    <b>{t('Select changes')}</b>
+                    <span>
+                      {t('Check files or an entire changelist; select a file to view a side-by-side diff.')}
+                    </span>
                   </li>
                   <li>
-                    <b>审查并提交</b>
-                    <span>填写提交说明，点击「提交」或「提交并推送」。提交包含勾选文件的全部改动。</span>
+                    <b>{t('Review and commit')}</b>
+                    <span>
+                      {t(
+                        'Write a commit message and click Commit or Commit & Push. The commit includes all changes in the checked files.',
+                      )}
+                    </span>
                   </li>
                   <li>
-                    <b>管理分支与历史</b>
-                    <span>单击分支筛选历史；右键打开检出、比较、合并、Rebase 等操作；双击检出分支。</span>
+                    <b>{t('Manage branches and history')}</b>
+                    <span>
+                      {t(
+                        'Click a branch to filter history; right-click for checkout, compare, merge, rebase, and more; double-click to check out.',
+                      )}
+                    </span>
                   </li>
                   <li>
-                    <b>暂存与处理冲突</b>
-                    <span>用 Stash 保存全部本地进度；冲突文件使用 VS Code 三方合并编辑器。</span>
+                    <b>{t('Stash and resolve conflicts')}</b>
+                    <span>
+                      {t(
+                        "Use Stash to save all local progress; resolve conflict files in VS Code's three-way merge editor.",
+                      )}
+                    </span>
                   </li>
                 </ol>
                 <div className="shortcut-row">
-                  <span>提交 / 提交并推送</span>
+                  <span>{t('Commit / Commit & Push')}</span>
                   <kbd>⌘ / Ctrl + Enter</kbd>
                   <kbd>+ Shift</kbd>
                 </div>
                 <div className="shortcut-row">
-                  <span>打开提交窗口</span>
+                  <span>{t('Open commit window')}</span>
                   <kbd>⌘ / Ctrl + Alt + K</kbd>
                 </div>
                 <div className="shortcut-row">
-                  <span>刷新 / 关闭对话框</span>
+                  <span>{t('Refresh / Close dialog')}</span>
                   <kbd>⌘ / Ctrl + R</kbd>
                   <kbd>Esc</kbd>
                 </div>
                 {isPreview && (
                   <p className="preview-note">
-                    当前为示例数据预览。安装 VSIX 后，插件连接你在 VS Code 中打开的真实 Git 仓库。
+                    {t(
+                      'This is a sample data preview. After installing the VSIX, the extension connects to the real Git repository you open in VS Code.',
+                    )}
                   </p>
                 )}
                 <button className="button primary full-width" onClick={() => setDialog(null)}>
-                  开始使用
+                  {t('Get Started')}
                 </button>
               </div>
             ) : dialog.type === 'push' ? (
               <>
-                <p className="modal-description">将当前分支的本地提交推送到远程仓库。</p>
+                <p className="modal-description">
+                  {t('Push local commits from the current branch to the remote repository.')}
+                </p>
                 <div className="push-route">
                   <div>
                     <GitBranch size={16} />
                     <span>
-                      <small>本地分支</small>
+                      <small>{t('Local branch')}</small>
                       <strong>{snapshot?.branch}</strong>
                     </span>
                   </div>
@@ -2498,13 +2593,13 @@ function App() {
                   <div>
                     <Box size={16} />
                     <span>
-                      <small>远程分支</small>
+                      <small>{t('Remote branch')}</small>
                       <strong>
                         {pushPreview
                           ? pushPreview.remote
                             ? `${pushPreview.remote}/${pushPreview.target}`
-                            : '请先配置远程仓库或上游'
-                          : snapshot?.upstream || '正在检查推送目标…'}
+                            : t('Configure a remote or upstream first')
+                          : snapshot?.upstream || t('Checking push target…')}
                       </strong>
                     </span>
                   </div>
@@ -2513,8 +2608,12 @@ function App() {
                   <ShieldCheck size={16} />
                   <span>
                     {pushPreview
-                      ? `${pushPreview.total} 个提交将推送到远程。${snapshot?.upstream ? '' : '首次推送将设置上游。'}`
-                      : '正在读取待推送的提交…'}
+                      ? t(
+                          'Commits to push: {0}. {1}',
+                          pushPreview.total,
+                          snapshot?.upstream ? '' : t('The first push will set the upstream.'),
+                        )
+                      : t('Reading commits to push…')}
                   </span>
                 </div>
                 {pushPreview && (
@@ -2527,52 +2626,64 @@ function App() {
                       </div>
                     ))}
                     {pushPreview.total > 100 && (
-                      <small>仅预览最近 100 个提交，共 {pushPreview.total} 个。</small>
+                      <small>
+                        {t('Only the latest 100 commits are previewed; {0} total.', pushPreview.total)}
+                      </small>
                     )}
-                    {!pushPreview.total && <small>本地分支已是最新状态。</small>}
+                    {!pushPreview.total && <small>{t('The local branch is already up to date.')}</small>}
                   </div>
                 )}
                 {!!snapshot?.behind && (
-                  <p className="modal-warning">落后上游 {snapshot.behind} 个提交，请先 Pull 更新后再推送。</p>
+                  <p className="modal-warning">
+                    {t(
+                      'The branch is {0} commits behind its upstream. Pull before pushing.',
+                      snapshot.behind,
+                    )}
+                  </p>
                 )}
                 <div className="modal-footer">
-                  <span className="muted">使用标准推送，保留远程历史。</span>
+                  <span className="muted">{t('Uses a standard push and preserves remote history.')}</span>
                   <div className="spacer" />
                   <button className="button" disabled={isBusy} onClick={() => setDialog(null)}>
-                    取消
+                    {t('Cancel')}
                   </button>
                   <button
                     className="button primary"
                     disabled={isBusy || !pushPreview?.remote || !!snapshot?.behind}
-                    onClick={() => void perform('push', {}, '推送', () => setDialog(null))}
+                    onClick={() => void perform('push', {}, t('Push'), () => setDialog(null))}
                   >
-                    {isBusy ? <LoaderCircle size={14} className="spin" /> : <ArrowUpFromLine size={14} />}推送
+                    {isBusy ? <LoaderCircle size={14} className="spin" /> : <ArrowUpFromLine size={14} />}
+                    {t('Push')}
                   </button>
                 </div>
               </>
             ) : dialog.type === 'move' ? (
               <>
-                <p className="modal-description">将选中的 {selected.size} 个文件归入一个更改列表。</p>
+                <p className="modal-description">
+                  {t('Move the {0} selected files into a changelist.', selected.size)}
+                </p>
                 <div className="move-options">
-                  {[{ id: '', name: '默认更改列表' }, ...(snapshot?.changelists || [])].map((list) => (
-                    <button
-                      className="button"
-                      disabled={isBusy}
-                      key={list.id}
-                      onClick={() =>
-                        void perform(
-                          'changelist',
-                          { action: 'move', id: list.id, paths: selectedFiles },
-                          '移动文件',
-                          () => setDialog(null),
-                        )
-                      }
-                    >
-                      <FolderClosed size={15} />
-                      {list.name}
-                      <ChevronRight size={14} />
-                    </button>
-                  ))}
+                  {[{ id: '', name: t('Default Changelist') }, ...(snapshot?.changelists || [])].map(
+                    (list) => (
+                      <button
+                        className="button"
+                        disabled={isBusy}
+                        key={list.id}
+                        onClick={() =>
+                          void perform(
+                            'changelist',
+                            { action: 'move', id: list.id, paths: selectedFiles },
+                            t('Move Files'),
+                            () => setDialog(null),
+                          )
+                        }
+                      >
+                        <FolderClosed size={15} />
+                        {list.name}
+                        <ChevronRight size={14} />
+                      </button>
+                    ),
+                  )}
                 </div>
               </>
             ) : (
@@ -2588,57 +2699,68 @@ function App() {
                         source: dialog.branch?.name,
                         remote: dialog.branch?.remote,
                       },
-                      '创建分支',
+                      t('Create Branch'),
                       () => setDialog(null),
                     );
                   if (dialog.type === 'renameBranch')
                     void perform(
                       'renameBranch',
                       { branch: dialog.branch!.name, name: dialogValue.trim() },
-                      '重命名分支',
+                      t('Rename Branch'),
                       () => setDialog(null),
                     );
                   if (dialog.type === 'changelist')
                     void perform(
                       'changelist',
                       { action: 'create', name: dialogValue.trim() },
-                      '创建更改列表',
+                      t('Create Changelist'),
                       () => setDialog(null),
                     );
                   if (dialog.type === 'stash')
-                    void perform('stash', { message: dialogValue.trim() }, '暂存更改', () => setDialog(null));
+                    void perform('stash', { message: dialogValue.trim() }, t('Stash Changes'), () =>
+                      setDialog(null),
+                    );
                 }}
               >
                 <p className="modal-description">
                   {dialog.type === 'newBranch'
-                    ? `从 ${dialog.branch?.name || '当前 HEAD'} 创建分支，并自动切换。`
+                    ? t(
+                        'Create a branch from {0} and switch to it automatically.',
+                        dialog.branch?.name || t('current HEAD'),
+                      )
                     : dialog.type === 'renameBranch'
-                      ? `重命名本地分支 ${dialog.branch?.name}，远程分支名称保持原样。`
+                      ? t(
+                          'Rename the local branch {0}. The remote branch name stays unchanged.',
+                          dialog.branch?.name ?? '',
+                        )
                       : dialog.type === 'changelist'
-                        ? '按任务组织改动，分别审查与提交。'
-                        : `保存全部 ${changes.length} 个本地更改（含未跟踪文件），然后清理工作区。`}
+                        ? t('Organize changes by task and review and commit them separately.')
+                        : t(
+                            'Save all {0} local changes (including untracked files), then clean the working tree.',
+                            changes.length,
+                          )}
                 </p>
                 <label className="form-label">
                   {dialog.type === 'newBranch' || dialog.type === 'renameBranch'
-                    ? '分支名称'
+                    ? t('Branch name')
                     : dialog.type === 'changelist'
-                      ? '更改列表名称'
-                      : 'Stash 说明（可选）'}
+                      ? t('Changelist name')
+                      : t('Stash message (optional)')}
                   <input
                     autoFocus
                     aria-label={
                       dialog.type === 'newBranch' || dialog.type === 'renameBranch'
-                        ? '分支名称'
+                        ? t('Branch name')
                         : dialog.type === 'changelist'
-                          ? '更改列表名称'
-                          : 'Stash 说明'
+                          ? t('Changelist name')
+                          : t('Stash message (optional)')
                     }
                     placeholder={
                       dialog.type === 'newBranch' || dialog.type === 'renameBranch'
                         ? 'feature/my-next-idea'
                         : dialog.type === 'changelist'
-                          ? '例如：登录功能'
-                          : 'WIP: 记录当前进度…'
+                          ? t('e.g. Login feature')
+                          : t('WIP: save current progress…')
                     }
                     value={dialogValue}
                     onChange={(event) => setDialogValue(event.target.value)}
@@ -2648,7 +2770,7 @@ function App() {
                 </label>
                 <div className="modal-footer">
                   <button className="button" type="button" disabled={isBusy} onClick={() => setDialog(null)}>
-                    取消
+                    {t('Cancel')}
                   </button>
                   <button
                     className="button primary"
@@ -2657,10 +2779,10 @@ function App() {
                   >
                     {isBusy && <LoaderCircle size={14} className="spin" />}
                     {dialog.type === 'stash'
-                      ? '暂存更改'
+                      ? t('Stash Changes')
                       : dialog.type === 'renameBranch'
-                        ? '重命名'
-                        : '创建'}
+                        ? t('Rename')
+                        : t('Create')}
                   </button>
                 </div>
               </form>

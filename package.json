@@ -1,8 +1,8 @@
 {
   "name": "gitloom",
   "displayName": "GitLoom",
-  "description": "VS Code 原生风格的紧凑 Git 底部面板，IDEA 式更改列表、Diff 与提交工作流。A compact Git workbench for VS Code.",
-  "version": "0.5.4",
+  "description": "%extension.description%",
+  "version": "0.5.5",
   "publisher": "windlively",
   "license": "MIT",
   "repository": {
@@ -48,23 +48,23 @@
     "commands": [
       {
         "command": "gitWorkbench.open",
-        "title": "打开 Git 工作台",
+        "title": "%command.open%",
         "category": "GitLoom",
         "icon": "$(git-branch)"
       },
       {
         "command": "gitWorkbench.commit",
-        "title": "提交更改",
+        "title": "%command.commit%",
         "category": "GitLoom"
       },
       {
         "command": "gitWorkbench.log",
-        "title": "查看提交历史",
+        "title": "%command.log%",
         "category": "GitLoom"
       },
       {
         "command": "gitWorkbench.push",
-        "title": "推送提交",
+        "title": "%command.push%",
         "category": "GitLoom"
       }
     ],
@@ -115,7 +115,7 @@
           "default": 300,
           "minimum": 50,
           "maximum": 2000,
-          "description": "一次加载的提交数量。"
+          "description": "%config.historyLimit.description%"
         },
         "gitWorkbench.pullStrategy": {
           "type": "string",
@@ -125,7 +125,7 @@
             "merge"
           ],
           "default": "ff-only",
-          "description": "更新项目的策略，默认仅快进，避免意外产生合并提交。"
+          "description": "%config.pullStrategy.description%"
         }
       }
     }
@@ -138,7 +138,7 @@
     "test": "tsx --test tests/*.test.ts",
     "test:host": "node scripts/test-host.mjs",
     "vscode:prepublish": "npm run check && npm run build",
-    "package": "vsce package --no-dependencies --out artifacts/gitloom-0.5.4.vsix"
+    "package": "vsce package --no-dependencies --out artifacts/gitloom-0.5.5.vsix"
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.46-24",

@@ -3,6 +3,7 @@ import path from 'node:path';
 import { randomBytes, randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import { GitService } from './git/service';
+import { normalizeLocale, translate, type Locale } from './shared/i18n';
 import type { Activity, Changelist, Method, Repository, Requests, Snapshot, View } from './shared/types';
 
 const METHODS: Method[] = [
@@ -85,7 +86,7 @@ export async function activate(context: vscode.ExtensionContext) {
   );
   const status = vscode.window.createStatusBarItem(vscode.StatusBarAlignment.Left, 99);
   status.text = '$(git-branch) GitLoom';
-  status.tooltip = '打开 IDEA 风格 Git 工作台';
+  status.tooltip = workbench.t('Open the IDEA-style Git workbench');
   status.command = 'gitWorkbench.open';
   if (vscode.workspace.workspaceFolders?.length) status.show();
   context.subscriptions.push(status);
@@ -123,6 +124,10 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
   private pendingPush = false;
   private readonly documents = new Map<string, string>();
   private readonly executable: string;
+  private readonly locale: Locale = normalizeLocale(vscode.env.language);
+  t(message: string, ...values: (string | number)[]) {
+    return translate(this.locale, message, ...values);
+  }
   constructor(private readonly context: vscode.ExtensionContext) {
     const configured = vscode.workspace.getConfiguration('git').get<string | string[]>('path');
     this.executable = (Array.isArray(configured) ? configured[0] : configured) || 'git';
@@ -227,12 +232,17 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
   }
   private selectRepository(root: string) {
     if (!this.repositories.some((repo) => repo.path === root))
-      throw new Error('请从当前工作区选择一个仓库。');
+      throw new Error(this.t('Select a repository from the current workspace.'));
     let service = this.services.get(root);
     if (!service) {
-      service = new GitService(root, this.executable, (entry) => {
-        if (this.service?.root === root) this.post({ type: 'activity', entry });
-      });
+      service = new GitService(
+        root,
+        this.executable,
+        (entry) => {
+          if (this.service?.root === root) this.post({ type: 'activity', entry });
+        },
+        this.locale,
+      );
       this.services.set(root, service);
     }
     this.service = service;
@@ -258,7 +268,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       await vscode.commands.executeCommand(WORKBENCH_CONTAINER_COMMAND);
       return;
     }
-    throw new Error('GitLoom 视图尚未注册，请重载 VS Code 窗口后重试。');
+    throw new Error(this.t('The GitLoom view is not registered. Reload the VS Code window and try again.'));
   }
 
   async open(view: View, push = false) {
@@ -272,7 +282,13 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       : new Promise<vscode.WebviewView>((resolve, reject) => {
           listener = resolve;
           this.viewWaiters.add(listener);
-          timer = setTimeout(() => reject(new Error('Git 底部面板未能打开，请重载窗口后重试。')), 10000);
+          timer = setTimeout(
+            () =>
+              reject(
+                new Error(this.t('The Git bottom panel did not open. Reload the window and try again.')),
+              ),
+            10000,
+          );
         });
     let panel: vscode.WebviewView;
     try {
@@ -286,7 +302,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       await new Promise<void>((resolve, reject) => {
         const timeout = setTimeout(() => {
           subscription.dispose();
-          reject(new Error('Git 面板未能显示。'));
+          reject(new Error(this.t('The Git panel did not become visible.')));
         }, 10000);
         const subscription = panel.onDidChangeVisibility(() => {
           if (panel.visible) {
@@ -340,7 +356,8 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
     const nonce = randomBytes(24).toString('base64');
     const script = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.js'));
     const style = webview.asWebviewUri(vscode.Uri.joinPath(this.context.extensionUri, 'dist', 'webview.css'));
-    return `<!doctype html><html lang="zh-CN"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>GitLoom</title></head><body data-host="panel" data-initial-view="${view}"><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
+    const lang = this.locale === 'zh-cn' ? 'zh-CN' : 'en';
+    return `<!doctype html><html lang="${lang}"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width, initial-scale=1.0"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src ${webview.cspSource} data:; font-src ${webview.cspSource}; style-src ${webview.cspSource} 'unsafe-inline'; script-src 'nonce-${nonce}';"><link rel="stylesheet" href="${style}"><title>GitLoom</title></head><body data-host="panel" data-locale="${this.locale}" data-initial-view="${view}"><div id="root"></div><script nonce="${nonce}" src="${script}"></script></body></html>`;
   }
 
   private async snapshot(): Promise<Snapshot> {
@@ -419,10 +436,11 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
     const method = request.method as Method;
     try {
       if (!request.params || typeof request.params !== 'object' || Array.isArray(request.params))
-        throw new Error('无效的操作参数。');
-      if (!READ_ONLY.has(method) && !vscode.workspace.isTrusted) throw new Error('请先信任当前工作区。');
+        throw new Error(this.t('Invalid operation parameters.'));
+      if (!READ_ONLY.has(method) && !vscode.workspace.isTrusted)
+        throw new Error(this.t('Trust the current workspace first.'));
       if (method !== 'snapshot' && method !== 'pickRepository' && request.repository !== this.service?.root)
-        throw new Error('仓库已切换，请刷新后重试。');
+        throw new Error(this.t('The repository has changed. Refresh and try again.'));
       const result = await this.dispatch(method, request.params as Record<string, unknown>);
       this.post({ type: 'response', id: request.id, result });
       if (method === 'snapshot') {
@@ -451,7 +469,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
     const string = (key: string, optional = false): string => {
       if (optional && params[key] === undefined) return '';
       if (typeof params[key] !== 'string' || (params[key] as string).includes('\0'))
-        throw new Error(`无效参数：${key}`);
+        throw new Error(this.t('Invalid parameter: {0}', key));
       return params[key] as string;
     };
     const paths = () => {
@@ -461,7 +479,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         params.paths.length > 5000 ||
         params.paths.some((file) => typeof file !== 'string')
       )
-        throw new Error('请选择需要操作的文件。');
+        throw new Error(this.t('Select the files to operate on.'));
       return params.paths as string[];
     };
     if (method === 'snapshot') {
@@ -478,18 +496,23 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         canSelectFolders: true,
         canSelectFiles: false,
         canSelectMany: false,
-        openLabel: '选择 Git 仓库',
+        openLabel: this.t('Select Git Repository'),
       });
       if (!selection?.[0]) return;
       const root = await GitService.discover(selection[0].fsPath, this.executable);
-      if (!root) throw new Error('该目录不是 Git 仓库。请先运行 git init 或选择已有仓库。');
+      if (!root)
+        throw new Error(
+          this.t(
+            'This directory is not a Git repository. Run git init or choose an existing repository first.',
+          ),
+        );
       if (!this.repositories.some((repo) => repo.path === root))
         this.repositories.push({ path: root, name: path.basename(root) });
       this.selectRepository(root);
       return;
     }
     const git = this.service;
-    if (!git) throw new Error('请先打开一个 Git 仓库。');
+    if (!git) throw new Error(this.t('Open a Git repository first.'));
     switch (method) {
       case 'diff':
         return git.diff(string('path'), {
@@ -499,7 +522,8 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       case 'commitDetail':
         return git.commitDetail(string('hash'));
       case 'commit': {
-        if (!(await vscode.workspace.saveAll(false))) throw new Error('部分文件未能保存，请保存文件后重试。');
+        if (!(await vscode.workspace.saveAll(false)))
+          throw new Error(this.t('Some files could not be saved. Save them and try again.'));
         const result = await git.commit(paths(), string('message'));
         if (params.push === true) {
           try {
@@ -534,15 +558,17 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
           remote = params.remote === true;
         if (
           await this.confirm(
-            `删除${remote ? '远程' : '本地'}分支「${name}」？`,
-            '删除分支',
-            remote
-              ? '这会删除远程服务器上的分支，影响其他协作者。远程分支已更新时会拒绝删除。'
-              : 'Git 只会删除已经合并的分支。',
+            this.t('Delete the {0} branch "{1}"?', this.t(remote ? 'remote' : 'local'), name),
+            this.t('Delete Branch'),
+            this.t(
+              remote
+                ? 'This deletes the branch on the remote server and affects collaborators. The deletion is rejected if the remote branch has changed.'
+                : 'Git only deletes branches that have been merged.',
+            ),
           )
         )
           return git.deleteBranch(name, remote);
-        throw new Error('已取消删除分支。');
+        throw new Error(this.t('Branch deletion canceled.'));
       }
       case 'merge':
         return git.merge(string('branch'), params.remote === true);
@@ -550,13 +576,15 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         const name = string('branch');
         if (
           await this.confirm(
-            `将当前分支 Rebase 到「${name}」？`,
-            'Rebase',
-            '当前分支的提交将被重新应用，提交 ID 会变化。已推送的分支需要与协作者协调。发生冲突后可在工作台继续或中止。',
+            this.t('Rebase the current branch onto "{0}"?', name),
+            this.t('Rebase'),
+            this.t(
+              'Commits on the current branch will be reapplied and their IDs will change. Coordinate with collaborators for branches that have already been pushed. If conflicts occur, continue or abort from the workbench.',
+            ),
           )
         )
           return git.rebase(name, params.remote === true);
-        throw new Error('已取消 Rebase。');
+        throw new Error(this.t('Rebase canceled.'));
       }
       case 'renameBranch':
         return git.renameBranch(string('branch'), string('name'));
@@ -573,7 +601,9 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         const diff = await git.branchDiff(string('path'), string('base'), string('head'));
         if (diff.binary || diff.truncated)
           throw new Error(
-            diff.binary ? '暂不支持分支间二进制文件的文本比较。' : '文件超过 20 MB，请使用外部差异工具。',
+            diff.binary
+              ? this.t('Text comparison of binary files between branches is not supported.')
+              : this.t('The file exceeds 20 MB. Use an external diff tool.'),
           );
         const token = randomUUID();
         const before = vscode.Uri.from({
@@ -596,7 +626,8 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         return;
       }
       case 'stash': {
-        if (!(await vscode.workspace.saveAll(false))) throw new Error('部分文件未能保存，请保存文件后重试。');
+        if (!(await vscode.workspace.saveAll(false)))
+          throw new Error(this.t('Some files could not be saved. Save them and try again.'));
         return git.stash(string('message'));
       }
       case 'stashApply':
@@ -604,21 +635,30 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       case 'stashFiles':
         return git.stashFiles(string('ref'));
       case 'stashDrop': {
-        if (await this.confirm(`删除 ${string('ref')}？`, '删除 Stash', '删除后无法通过 Stash 列表恢复。'))
+        if (
+          await this.confirm(
+            this.t('Delete {0}?', string('ref')),
+            this.t('Delete Stash'),
+            this.t('A deleted stash cannot be restored from the Stash list.'),
+          )
+        )
           return git.stashDrop(string('ref'));
-        throw new Error('已取消删除 Stash。');
+        throw new Error(this.t('Stash deletion canceled.'));
       }
       case 'discard': {
         const selected = paths();
         if (
           await this.confirm(
-            `回滚 ${selected.length} 个文件的所有本地更改？`,
-            '回滚更改',
-            `${selected.slice(0, 8).join('\n')}\n\n将还原到 HEAD，包含暂存区更改；未跟踪文件会被删除。此操作无法撤销。`,
+            this.t('Discard all local changes in {0} files?', selected.length),
+            this.t('Discard Changes'),
+            this.t(
+              '{0}\n\nThis resets to HEAD, including staged changes; untracked files will be deleted. This cannot be undone.',
+              selected.slice(0, 8).join('\n'),
+            ),
           )
         )
           return git.discard(selected);
-        throw new Error('已取消回滚。');
+        throw new Error(this.t('Discard canceled.'));
       }
       case 'markResolved':
         return git.markResolved(string('path'));
@@ -641,32 +681,40 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         const hash = string('hash');
         if (
           await this.confirm(
-            `还原提交 ${hash.slice(0, 8)} 的改动？`,
-            '创建还原提交',
-            '会创建一个新的反向提交，保留原提交历史。',
+            this.t('Revert the changes in commit {0}?', hash.slice(0, 8)),
+            this.t('Create Revert Commit'),
+            this.t('This creates a new inverse commit and preserves the original history.'),
           )
         )
           return git.revert(hash);
-        throw new Error('已取消还原提交。');
+        throw new Error(this.t('Revert canceled.'));
       }
       case 'reset': {
         const hash = string('hash');
         if (
           await this.confirm(
-            `强制重置当前分支到提交 ${hash.slice(0, 8)}？`,
-            '强制重置',
-            '当前分支将指向该提交，暂存区和工作区中已跟踪的更改会被丢弃，未跟踪文件保留。此操作无法撤销。',
+            this.t('Hard reset the current branch to commit {0}?', hash.slice(0, 8)),
+            this.t('Hard Reset'),
+            this.t(
+              'The current branch will point to this commit. Tracked changes in the index and working tree will be discarded; untracked files are kept. This cannot be undone.',
+            ),
           )
         )
           return git.reset(hash);
-        throw new Error('已取消强制重置。');
+        throw new Error(this.t('Hard reset canceled.'));
       }
       case 'continueOperation':
         return git.continueOperation();
       case 'abortOperation': {
-        if (await this.confirm('中止当前 Git 操作？', '中止操作', '将交由 Git 恢复到操作前的状态。'))
+        if (
+          await this.confirm(
+            this.t('Abort the current Git operation?'),
+            this.t('Abort Operation'),
+            this.t('Git will restore the state before the operation.'),
+          )
+        )
           return git.abortOperation();
-        throw new Error('已取消中止操作。');
+        throw new Error(this.t('Abort canceled.'));
       }
       case 'changelist': {
         let lists = this.changelists(git.root);
@@ -675,12 +723,13 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         if (action === 'create') {
           const name = string('name').trim();
           if (!name || name.length > 80 || lists.some((list) => list.name === name))
-            throw new Error('请输入不重复的更改列表名称（1–80 字）。');
+            throw new Error(this.t('Enter a unique changelist name (1–80 characters).'));
           lists = [...lists, { id: randomUUID(), name, paths: [] }];
         } else if (action === 'delete') lists = lists.filter((list) => list.id !== id);
         else if (action === 'move') {
           const selected = paths();
-          if (id && !lists.some((list) => list.id === id)) throw new Error('更改列表不存在。');
+          if (id && !lists.some((list) => list.id === id))
+            throw new Error(this.t('The changelist does not exist.'));
           for (const file of selected) git.validatePath(file);
           lists = lists.map((list) => ({
             ...list,
@@ -689,7 +738,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
               ...(list.id === id ? selected : []),
             ],
           }));
-        } else throw new Error('无效的更改列表操作。');
+        } else throw new Error(this.t('Invalid changelist operation.'));
         await this.context.workspaceState.update(`lists:${git.root}`, lists);
         return;
       }
@@ -708,9 +757,12 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         await vscode.commands.executeCommand('git.openChange', vscode.Uri.file(await git.safePath(file)));
         return;
       }
-      throw new Error('暂不支持历史二进制文件的原生比较，请使用本地文件查看器。');
+      throw new Error(
+        this.t('Native comparison of binary files in history is not supported. Use a local file viewer.'),
+      );
     }
-    if (diff.truncated) throw new Error('文件超过 20 MB，请使用外部差异工具查看。');
+    if (diff.truncated)
+      throw new Error(this.t('The file exceeds 20 MB. Use an external diff tool to view it.'));
     const scheme = 'git-workbench-preview';
     const token = randomUUID();
     const before = vscode.Uri.from({ scheme, path: `/${token}/before/${file}` });

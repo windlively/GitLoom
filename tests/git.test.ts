@@ -9,7 +9,7 @@ import { parseStatus, parseNumstat } from '../src/git/parsers';
 async function repository(t: { after: (callback: () => Promise<void>) => void }) {
   const root = await mkdtemp(path.join(tmpdir(), 'git-workbench-test-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const git = new GitService(root);
+  const git = new GitService(root, 'git', undefined, 'zh-cn');
   await git.run(['init', '-b', 'main']);
   await git.run(['config', 'user.name', 'Workbench Test']);
   await git.run(['config', 'user.email', 'workbench@example.com']);
@@ -24,6 +24,16 @@ async function repository(t: { after: (callback: () => Promise<void>) => void })
   };
   return { root, git, write, initial };
 }
+
+test('Git service errors follow the configured locale', async (t) => {
+  const root = await mkdtemp(path.join(tmpdir(), 'git-workbench-test-'));
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await assert.rejects(new GitService(root).diff('../outside'), /Invalid repository file path/);
+  await assert.rejects(
+    new GitService(root, 'git', undefined, 'zh-cn').diff('../outside'),
+    /无效的仓库文件路径/,
+  );
+});
 
 test('parses NUL-delimited status, rename and unusual filenames', () => {
   const changes = parseStatus(

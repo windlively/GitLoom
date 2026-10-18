@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
+import { t } from './i18n';
 
 export interface MenuAction {
   label: string;
@@ -56,7 +57,7 @@ export function ContextMenu({
       ref={menu}
       className="branch-context-menu"
       role="menu"
-      aria-label={label || `分支 ${title} 操作`}
+      aria-label={label || t('Actions for branch {0}', title)}
       style={position}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {

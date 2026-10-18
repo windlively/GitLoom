@@ -39,6 +39,7 @@ export async function run() {
     await vscode.commands.executeCommand('gitWorkbench.push');
     assert.ok(internal.panel?.visible, 'Git workbench is a visible native panel view');
     assert.match(internal.panel.webview.html, /data-host="panel"/);
+    assert.match(internal.panel.webview.html, /data-locale="en"/);
     assert.match(internal.panel.webview.html, /font-src /, 'local Codicons are permitted by the Webview CSP');
     const style = await readFile(
       path.join(process.env.GIT_WORKBENCH_EXTENSION_ROOT!, 'dist/webview.css'),
@@ -54,9 +55,7 @@ export async function run() {
       'source editor stays visible above the panel',
     );
     assert.ok(
-      !vscode.window.tabGroups.all
-        .flatMap((group) => group.tabs)
-        .some((tab) => tab.label === 'GitLoom'),
+      !vscode.window.tabGroups.all.flatMap((group) => group.tabs).some((tab) => tab.label === 'GitLoom'),
       'opening Git creates no editor tab',
     );
     assert.ok(vscode.window.terminals.includes(terminal), 'terminal remains available beside the Git panel');
@@ -120,7 +119,7 @@ export async function run() {
       push: true,
     });
     assert.equal(reply.error, undefined);
-    assert.match(reply.result.pushError, /远程仓库/);
+    assert.match(reply.result.pushError, /No remote is configured/);
     state = (await rpc('snapshot', {})).result;
     assert.equal(state.commits[0].subject, 'local commit before failed push');
     const originalBranch = state.branch;
@@ -133,13 +132,13 @@ export async function run() {
     assert.deepEqual(reply.result.files, []);
     await rpc('checkout', { branch: originalBranch, remote: false });
     reply = await rpc('compareBranch', { branch: 'missing-branch' });
-    assert.match(reply.error, /不存在/);
+    assert.match(reply.error, /does not exist/);
     reply = await rpc('openBranchDiff', {
       path: 'tracked.txt',
       base: state.commits[1].hash,
       head: state.commits[0].hash,
     });
-    assert.match(reply.error, /不在本次/);
+    assert.match(reply.error, /not part of this branch comparison/);
     reply = await rpc('openBranchDiff', {
       path: 'untracked.txt',
       base: state.commits[1].hash,
@@ -164,9 +163,9 @@ export async function run() {
       { paths: ['tracked.txt'], message: 'should not commit' },
       '/wrong/repository',
     );
-    assert.match(reply.error, /仓库已切换/);
+    assert.match(reply.error, /repository has changed/);
     reply = await rpc('diff', { path: '../outside' });
-    assert.match(reply.error, /路径/);
+    assert.match(reply.error, /Invalid repository file path/);
     reply = await rpc('openFile', { path: 'tracked.txt' });
     assert.equal(reply.error, undefined);
     reply = await rpc('openDiff', { path: 'tracked.txt' });
@@ -204,7 +203,7 @@ export async function run() {
     await writeFile(outside, 'outside file content\n');
     await symlink(outside, path.join(root, 'link.txt'));
     reply = await rpc('openFile', { path: 'link.txt' });
-    assert.match(reply.error, /链接目标/);
+    assert.match(reply.error, /Opening link targets outside the repository/);
     reply = await rpc('openDiff', { path: 'link.txt' });
     assert.equal(reply.error, undefined);
     const linkDiff = vscode.window.tabGroups.all

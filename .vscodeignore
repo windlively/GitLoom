@@ -3,6 +3,7 @@
 .gitignore
 .DS_Store
 AGENTS.md
+README.en.md
 docs/**
 node_modules/**
 src/**

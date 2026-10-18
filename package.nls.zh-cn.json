@@ -1,0 +1,9 @@
+{
+  "extension.description": "VS Code 原生风格的紧凑 Git 底部面板，IDEA 式更改列表、Diff 与提交工作流。",
+  "command.open": "打开 Git 工作台",
+  "command.commit": "提交更改",
+  "command.log": "查看提交历史",
+  "command.push": "推送提交",
+  "config.historyLimit.description": "一次加载的提交数量。",
+  "config.pullStrategy.description": "更新项目的策略，默认仅快进，避免意外产生合并提交。"
+}

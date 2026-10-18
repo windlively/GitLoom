@@ -7,6 +7,7 @@ import {
 } from 'react';
 import type { Branch } from '../../src/shared/types';
 import { ChevronRight, GitBranch, Plus, Search } from './icons';
+import { t } from './i18n';
 
 type Placement = { left: number; top: number; width: number; maxHeight: number };
 
@@ -95,8 +96,8 @@ export function BranchDropdown({
 
   const matches = branches.filter((branch) => branch.name.toLowerCase().includes(query.toLowerCase()));
   const groups = [
-    { label: '本地分支', items: matches.filter((branch) => !branch.remote) },
-    { label: '远程分支', items: matches.filter((branch) => branch.remote) },
+    { label: t('Local branches'), items: matches.filter((branch) => !branch.remote) },
+    { label: t('Remote branches'), items: matches.filter((branch) => branch.remote) },
   ];
   const isActive = (branch: Branch) =>
     !!activeBranch && activeBranch.name === branch.name && activeBranch.remote === branch.remote;
@@ -128,7 +129,7 @@ export function BranchDropdown({
       ref={panel}
       className="branch-dropdown"
       role="dialog"
-      aria-label="选择分支"
+      aria-label={t('Select branch')}
       style={{
         left: placement?.left ?? 4,
         top: placement?.top ?? 0,
@@ -142,8 +143,8 @@ export function BranchDropdown({
         <Search size={14} />
         <input
           ref={search}
-          aria-label="查找分支"
-          placeholder="查找分支…"
+          aria-label={t('Find branch')}
+          placeholder={t('Find branch…')}
           value={query}
           onChange={(event) => {
             onDismissSubmenu();
@@ -183,7 +184,7 @@ export function BranchDropdown({
                       <strong>{branch.name}</strong>
                       <small>{branch.upstream || branch.subject}</small>
                     </span>
-                    {branch.current && <span className="tag">当前</span>}
+                    {branch.current && <span className="tag">{t('Current')}</span>}
                     <ChevronRight size={13} />
                   </button>
                 </div>
@@ -191,19 +192,19 @@ export function BranchDropdown({
             </div>
           ) : null,
         )}
-        {!matches.length && <p className="sidebar-empty">没有匹配的分支</p>}
+        {!matches.length && <p className="sidebar-empty">{t('No matching branches')}</p>}
       </div>
       <div className="branch-dropdown-footer">
         <button
           className="button"
           disabled={newBranchDisabled}
-          title={newBranchDisabled ? '请先完成当前 Git 操作' : undefined}
+          title={newBranchDisabled ? t('Finish the current Git operation first') : undefined}
           onClick={onNewBranch}
         >
           <Plus size={14} />
-          新建分支
+          {t('New branch')}
         </button>
-        <span className="muted">悬停分支查看操作</span>
+        <span className="muted">{t('Hover a branch to see its actions')}</span>
       </div>
     </div>
   );

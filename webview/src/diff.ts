@@ -1,4 +1,5 @@
 import { diffLines } from 'diff';
+import { t } from './i18n';
 export interface DiffRow {
   left: string;
   right: string;
@@ -8,7 +9,7 @@ export interface DiffRow {
 }
 export function makeDiffRows(before: string, after: string, contextOnly = false): DiffRow[] {
   const chunks = diffLines(before, after, { timeout: 1000 });
-  if (!chunks) throw new Error('差异计算超时，请使用 VS Code 原生差异编辑器。');
+  if (!chunks) throw new Error(t('Diff calculation timed out. Use the native VS Code diff editor.'));
   const rows: DiffRow[] = [];
   let left = 1,
     right = 1;

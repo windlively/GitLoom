@@ -11,6 +11,7 @@ import type {
   PushPreview,
   Snapshot,
 } from '../shared/types';
+import { translate, type Locale } from '../shared/i18n';
 import { parseBranches, parseLog, parseNumstat, parseStashes, parseStatus } from './parsers';
 
 const LOG_FORMAT = '%H%x00%P%x00%an%x00%ae%x00%aI%x00%s%x00%D';
@@ -19,8 +20,9 @@ export class GitError extends Error {
   constructor(
     public readonly args: string[],
     public readonly output: string,
+    locale: Locale = 'en',
   ) {
-    super(output.trim() || `Git 命令失败：${args[0]}`);
+    super(output.trim() || translate(locale, 'Git command failed: {0}', args[0]));
   }
 }
 
@@ -30,8 +32,13 @@ export class GitService {
     public readonly root: string,
     private readonly executable = 'git',
     private readonly onActivity?: (entry: Activity) => void,
+    private readonly locale: Locale = 'en',
   ) {
     this.root = path.resolve(root);
+  }
+
+  private t(message: string, ...values: (string | number)[]) {
+    return translate(this.locale, message, ...values);
   }
 
   async run(
@@ -76,13 +83,15 @@ export class GitService {
       child.stderr.on('data', collect(stderr));
       child.on('error', (error) => {
         clearTimeout(timer);
-        reject(new Error(`无法运行 Git：${error.message}`));
+        reject(new Error(this.t('Unable to run Git: {0}', error.message)));
       });
       child.on('close', (code) => {
         clearTimeout(timer);
         const output = Buffer.concat(stdout).toString('utf8');
         const error = stopped
-          ? 'Git 操作超时或输出过大，请在终端检查仓库。'
+          ? this.t(
+              'The Git operation timed out or produced too much output. Check the repository in a terminal.',
+            )
           : Buffer.concat(stderr).toString('utf8');
         if (!options.silent)
           this.onActivity?.({
@@ -93,7 +102,7 @@ export class GitService {
             error: code !== 0,
           });
         if (code === 0 && !stopped) resolve(output);
-        else reject(new GitError(args, error || output));
+        else reject(new GitError(args, error || output, this.locale));
       });
     });
   }
@@ -265,10 +274,11 @@ export class GitService {
       path.isAbsolute(file) ||
       file.split('/').some((part) => part === '..' || part.toLowerCase() === '.git')
     ) {
-      throw new Error('无效的仓库文件路径。');
+      throw new Error(this.t('Invalid repository file path.'));
     }
     const absolute = path.resolve(this.root, file);
-    if (!absolute.startsWith(this.root + path.sep)) throw new Error('文件必须位于当前仓库中。');
+    if (!absolute.startsWith(this.root + path.sep))
+      throw new Error(this.t('The file must be inside the current repository.'));
     return absolute;
   }
 
@@ -281,7 +291,9 @@ export class GitService {
         const resolved = await realpath(parent),
           root = await realpath(this.root);
         if (resolved !== root && !resolved.startsWith(root + path.sep))
-          throw new Error('不允许通过符号链接访问仓库之外的文件。');
+          throw new Error(
+            this.t('Accessing files outside the repository through symbolic links is not allowed.'),
+          );
         break;
       } catch (error) {
         if ((error as NodeJS.ErrnoException).code !== 'ENOENT') throw error;
@@ -291,18 +303,19 @@ export class GitService {
     if (followLeaf) {
       const resolved = await realpath(absolute),
         root = await realpath(this.root);
-      if (!resolved.startsWith(root + path.sep)) throw new Error('不允许打开仓库之外的链接目标。');
+      if (!resolved.startsWith(root + path.sep))
+        throw new Error(this.t('Opening link targets outside the repository is not allowed.'));
       return resolved;
     }
     return absolute;
   }
 
   private hash(hash: string): string {
-    if (!/^[a-f0-9]{40,64}$/.test(hash)) throw new Error('无效的提交 ID。');
+    if (!/^[a-f0-9]{40,64}$/.test(hash)) throw new Error(this.t('Invalid commit ID.'));
     return hash;
   }
   private stashRef(ref: string): string {
-    if (!/^stash@\{\d+\}$/.test(ref)) throw new Error('无效的 Stash。');
+    if (!/^stash@\{\d+\}$/.test(ref)) throw new Error(this.t('Invalid stash reference.'));
     return ref;
   }
 
@@ -324,13 +337,13 @@ export class GitService {
     const limit = options.full ? 20 * MAX_FILE : MAX_FILE;
     let before: Buffer, after: Buffer;
     let beforeLabel = 'HEAD',
-      afterLabel = '工作区';
+      afterLabel = this.t('Working tree');
     if (options.commit || options.stash) {
       const revision = options.commit ? this.hash(options.commit) : this.stashRef(options.stash!);
       const parents = (await this.run(['rev-list', '--parents', '-n', '1', revision], { silent: true }))
         .trim()
         .split(' ');
-      beforeLabel = parents[1]?.slice(0, 8) || '空文件';
+      beforeLabel = parents[1]?.slice(0, 8) || this.t('Empty file');
       afterLabel = revision.slice(0, 12);
       const change = (await this.changedFiles(revision)).find((item) => item.path === file);
       before = parents[1]
@@ -445,9 +458,9 @@ export class GitService {
       const requested = new Set(paths);
       const selected = changes.filter((change) => requested.has(change.path));
       if (!selected.length || selected.length !== requested.size)
-        throw new Error('文件列表已变化，请刷新后重试。');
+        throw new Error(this.t('The file list has changed. Refresh and try again.'));
       if (selected.some((change) => change.status === 'conflict'))
-        throw new Error('冲突文件请先在合并编辑器中解决并标记。');
+        throw new Error(this.t('Resolve and mark conflict files in the merge editor first.'));
       const pathspecs = [
         ...new Set(
           selected.flatMap((change) =>
@@ -457,13 +470,13 @@ export class GitService {
       ];
       for (const file of pathspecs) await this.safePath(file);
       await this.run(['add', '-A', '--', ...pathspecs]);
-      return `已暂存 ${selected.length} 个文件。`;
+      return this.t('Staged {0} files.', selected.length);
     });
   }
 
   async commit(paths: string[], message: string): Promise<string> {
-    if (!message.trim()) throw new Error('请输入提交说明。');
-    if (message.length > 100000) throw new Error('提交说明过长。');
+    if (!message.trim()) throw new Error(this.t('Enter a commit message.'));
+    if (message.length > 100000) throw new Error(this.t('The commit message is too long.'));
     return this.serialize(async () => {
       if (
         (await this.existsGitPath('MERGE_HEAD')) ||
@@ -471,15 +484,16 @@ export class GitService {
         (await this.existsGitPath('CHERRY_PICK_HEAD')) ||
         (await this.existsGitPath('REVERT_HEAD'))
       )
-        throw new Error('请先在冲突提示条中完成或中止当前 Git 操作。');
+        throw new Error(this.t('Complete or abort the current Git operation in the conflict banner first.'));
       const changes = parseStatus(
         await this.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { silent: true }),
       );
       const known = new Set(changes.map((change) => change.path)),
         requested = new Set(paths);
       if (!paths.length || paths.some((file) => !known.has(file)))
-        throw new Error('文件列表已变化，请刷新后重新选择。');
-      if (changes.some((change) => change.status === 'conflict')) throw new Error('请先解决所有冲突。');
+        throw new Error(this.t('The file list has changed. Refresh and select the files again.'));
+      if (changes.some((change) => change.status === 'conflict'))
+        throw new Error(this.t('Resolve all conflicts first.'));
       const selected = changes.filter((change) => requested.has(change.path));
       const pathspecs = [
         ...new Set(
@@ -502,9 +516,9 @@ export class GitService {
   pull(strategy: 'ff-only' | 'rebase' | 'merge' = 'ff-only'): Promise<string> {
     return this.serialize(async () => {
       if (!(await this.optional(['rev-parse', '--verify', '@{upstream}'])).trim())
-        throw new Error('当前分支没有上游分支，请先推送并设置上游。');
+        throw new Error(this.t('The current branch has no upstream. Push and set an upstream first.'));
       if ((await this.run(['status', '--porcelain'], { silent: true })).trim())
-        throw new Error('请先提交或 Stash 本地更改，再更新项目。');
+        throw new Error(this.t('Commit or stash local changes before updating the project.'));
       return this.run(
         ['pull', strategy === 'rebase' ? '--rebase' : strategy === 'merge' ? '--no-rebase' : '--ff-only'],
         { network: true },
@@ -529,8 +543,10 @@ export class GitService {
       if (!remote)
         throw new Error(
           remotes.length
-            ? '存在多个远程仓库，请先在终端设置当前分支的上游。'
-            : '尚未配置远程仓库。请先使用 git remote add origin <URL>。',
+            ? this.t(
+                'Multiple remotes are configured. Set the upstream for the current branch in a terminal first.',
+              )
+            : this.t('No remote is configured. Run git remote add origin <URL> first.'),
         );
       return this.run(['push', '--set-upstream', '--', remote, branch], { network: true });
     });
@@ -581,14 +597,15 @@ export class GitService {
     const branch = branches.find(
       (item) => item.name === name && (remote === undefined || item.remote === remote),
     );
-    if (!branch) throw new Error('分支不存在，请刷新后重试。');
+    if (!branch) throw new Error(this.t('The branch does not exist. Refresh and try again.'));
     return branch;
   }
   private branchRef(branch: { name: string; remote: boolean }) {
     return `refs/${branch.remote ? 'remotes' : 'heads'}/${branch.name}`;
   }
   private async validBranchName(name: string) {
-    if (!name || name.startsWith('-') || name !== name.trim()) throw new Error('请输入有效的分支名称。');
+    if (!name || name.startsWith('-') || name !== name.trim())
+      throw new Error(this.t('Enter a valid branch name.'));
     await this.run(['check-ref-format', '--branch', name], { silent: true });
   }
   checkout(name: string, remote?: boolean): Promise<string> {
@@ -602,7 +619,12 @@ export class GitService {
           await this.optional(['for-each-ref', '--format=%(upstream)', `refs/heads/${local}`])
         ).trim();
         if (upstream !== this.branchRef(branch))
-          throw new Error(`本地分支「${local}」已存在且跟踪目标不同，请使用“从此分支新建并切换”。`);
+          throw new Error(
+            this.t(
+              'Local branch "{0}" already exists and tracks a different upstream. Use "Create and Switch from This Branch" instead.',
+              local,
+            ),
+          );
         return this.run(['switch', '--', local]);
       }
       return this.run(['switch', '--track', '-c', local, this.branchRef(branch)]);
@@ -618,13 +640,13 @@ export class GitService {
   deleteBranch(name: string, remote = false): Promise<string> {
     return this.serialize(async () => {
       const branch = await this.existingBranch(name, remote);
-      if (branch.current) throw new Error('不能删除当前分支。');
+      if (branch.current) throw new Error(this.t('The current branch cannot be deleted.'));
       if (!remote) return this.run(['branch', '-d', '--', name]);
       const slash = name.indexOf('/');
       const remoteName = name.slice(0, slash),
         target = name.slice(slash + 1);
       const remotes = (await this.run(['remote'], { silent: true })).trim().split('\n');
-      if (slash < 1 || !remotes.includes(remoteName)) throw new Error('远程仓库不存在。');
+      if (slash < 1 || !remotes.includes(remoteName)) throw new Error(this.t('The remote does not exist.'));
       // Pin the expected old tip so a newly updated remote branch cannot be deleted by accident.
       const tip = (
         await this.run(['rev-parse', '--verify', this.branchRef(branch)], { silent: true })
@@ -644,10 +666,11 @@ export class GitService {
   rebase(name: string, remote?: boolean): Promise<string> {
     return this.serialize(async () => {
       const branch = await this.existingBranch(name, remote);
-      if (branch.current) throw new Error('请选择其他分支作为 Rebase 目标。');
+      if (branch.current) throw new Error(this.t('Choose another branch as the rebase target.'));
       const state = await this.snapshot();
-      if (state.detached || state.operation) throw new Error('请先结束当前 Git 操作，并切换到本地分支。');
-      if (state.changes.length) throw new Error('请先提交或 Stash 本地更改，再执行 Rebase。');
+      if (state.detached || state.operation)
+        throw new Error(this.t('Finish the current Git operation and switch to a local branch first.'));
+      if (state.changes.length) throw new Error(this.t('Commit or stash local changes before rebasing.'));
       return this.run(['rebase', this.branchRef(branch)]);
     });
   }
@@ -730,7 +753,7 @@ export class GitService {
     this.hash(base);
     this.hash(head);
     const change = (await this.comparisonFiles(base, head)).find((item) => item.path === file);
-    if (!change) throw new Error('文件不在本次分支比较结果中。');
+    if (!change) throw new Error(this.t('The file is not part of this branch comparison.'));
     const before = await this.content(base, change.originalPath || file, 20 * MAX_FILE);
     const after = await this.content(head, file, 20 * MAX_FILE);
     const binary = before.includes(0) || after.includes(0),
@@ -747,7 +770,7 @@ export class GitService {
   }
   stash(message: string): Promise<string> {
     return this.serialize(() =>
-      this.run(['stash', 'push', '--include-untracked', '-m', message.trim() || 'GitLoom 暂存']),
+      this.run(['stash', 'push', '--include-untracked', '-m', message.trim() || this.t('GitLoom stash')]),
     );
   }
   stashApply(ref: string, pop = false): Promise<string> {
@@ -786,20 +809,21 @@ export class GitService {
       const requested = new Set(paths);
       const selected = changes.filter((change) => requested.has(change.path));
       if (!selected.length || selected.length !== requested.size)
-        throw new Error('文件列表已变化，请刷新后重试。');
+        throw new Error(this.t('The file list has changed. Refresh and try again.'));
       if (selected.some((change) => change.status === 'conflict'))
-        throw new Error('冲突文件不能回滚，请打开合并编辑器。');
+        throw new Error(this.t('Conflict files cannot be discarded. Open the merge editor instead.'));
       const hasHead = !!(await this.optional(['rev-parse', '--verify', 'HEAD'])).trim();
       const tracked: string[] = [];
       for (const change of selected) {
         const absolute = await this.safePath(change.path);
         if (change.status === 'untracked') await rm(absolute, { force: true });
-        else if (!hasHead) throw new Error('首次提交前请通过编辑器处理已暂存文件。');
+        else if (!hasHead)
+          throw new Error(this.t('Handle staged files in the editor before the first commit.'));
         else tracked.push(...(change.originalPath ? [change.path, change.originalPath] : [change.path]));
       }
       return tracked.length
         ? this.run(['restore', '--source=HEAD', '--staged', '--worktree', '--', ...tracked])
-        : '已删除选中的未跟踪文件。';
+        : this.t('Deleted the selected untracked files.');
     });
   }
   markResolved(file: string): Promise<string> {
@@ -823,7 +847,7 @@ export class GitService {
         (await this.existsGitPath('CHERRY_PICK_HEAD')) ||
         (await this.existsGitPath('REVERT_HEAD'))
       )
-        throw new Error('请先在冲突提示条中完成或中止当前 Git 操作。');
+        throw new Error(this.t('Complete or abort the current Git operation in the conflict banner first.'));
       return this.run(['reset', '--hard', target]);
     });
   }
@@ -835,7 +859,7 @@ export class GitService {
         return this.run(['cherry-pick', '--continue'], { env: { GIT_EDITOR: 'true' } });
       if (await this.existsGitPath('REVERT_HEAD'))
         return this.run(['revert', '--continue'], { env: { GIT_EDITOR: 'true' } });
-      throw new Error('没有需要继续的 Git 操作。');
+      throw new Error(this.t('There is no Git operation to continue.'));
     });
   }
   abortOperation(): Promise<string> {
@@ -844,7 +868,7 @@ export class GitService {
       if (await this.existsGitPath('MERGE_HEAD')) return this.run(['merge', '--abort']);
       if (await this.existsGitPath('CHERRY_PICK_HEAD')) return this.run(['cherry-pick', '--abort']);
       if (await this.existsGitPath('REVERT_HEAD')) return this.run(['revert', '--abort']);
-      throw new Error('没有可以中止的 Git 操作。');
+      throw new Error(this.t('There is no Git operation to abort.'));
     });
   }
 }

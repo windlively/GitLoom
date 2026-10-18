@@ -47,6 +47,7 @@ try {
       '--skip-release-notes',
       '--disable-updates',
       '--disable-telemetry',
+      '--locale=en',
     ],
   });
 } finally {

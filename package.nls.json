@@ -1,0 +1,9 @@
+{
+  "extension.description": "A compact Git bottom panel for VS Code with an IDEA-style changelist, diff, and commit workflow.",
+  "command.open": "Open Git Workbench",
+  "command.commit": "Commit Changes",
+  "command.log": "View Commit History",
+  "command.push": "Push Commits",
+  "config.historyLimit.description": "Number of commits to load at once.",
+  "config.pullStrategy.description": "Strategy for updating the project. Fast-forward only by default to avoid unexpected merge commits."
+}

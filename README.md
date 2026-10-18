@@ -1,5 +1,7 @@
 # GitLoom · 织序
 
+[English](README.en.md) | 简体中文
+
 **在 VS Code 底部面板里完成「更改 → Diff → 提交 → 推送」。** 像 IntelliJ IDEA 的 Git 工具窗口一样紧凑，同时完全沿用 VS Code 的主题、字体与面板习惯。
 
 GitLoom is a compact Git workbench for VS Code's bottom panel: review changes with inline diff, stage selected files, commit, browse history and manage branches without leaving the editor.
@@ -17,11 +19,11 @@ GitLoom is a compact Git workbench for VS Code's bottom panel: review changes wi
 
 更改列表与内嵌 Diff（深色主题）：
 
-![GitLoom 更改列表、内嵌 Diff 与提交框](https://raw.githubusercontent.com/windlively/GitLoom/main/docs/screenshots/changes-dark.png)
+![GitLoom 更改列表、内嵌 Diff 与提交框](https://gcore.jsdelivr.net/gh/windlively/GitLoom@0d8b8db/docs/screenshots/changes-dark.png)
 
 提交历史、提交图与提交详情（浅色主题）：
 
-![GitLoom 提交历史与提交详情](https://raw.githubusercontent.com/windlively/GitLoom/main/docs/screenshots/history-light.png)
+![GitLoom 提交历史与提交详情](https://gcore.jsdelivr.net/gh/windlively/GitLoom@0d8b8db/docs/screenshots/history-light.png)
 
 工作台使用 VS Code 原生面板容器，打开时不创建编辑器标签页。可以拖动面板上边缘调整高度，使用 VS Code 面板的最大化、收起和关闭按钮，也可以用 `Cmd+J` / `Ctrl+J` 显示或隐藏底部面板。切换到终端再切回时保留工作台和提交草稿。
 
@@ -29,7 +31,7 @@ GitLoom is a compact Git workbench for VS Code's bottom panel: review changes wi
 
 分支选择、推送预览等对话框可通过标题栏拖动位置，拖动边缘或四角调整大小；双击标题栏恢复默认位置和大小，关闭后再次打开会沿用上次的尺寸。
 
-界面按 VS Code 原生组件风格呈现，实时沿用主题提供的面板、列表、输入框、按钮、悬停、选中与焦点颜色，字体跟随 VS Code 设置，Diff 跟随编辑器字体。仓库选择、历史筛选和上游分支使用自绘下拉菜单，支持方向键、Home/End 与首字母定位。提交图采用与 VS Code 源码管理视图一致的紧凑泳道、圆角连线和节点样式。文件行高 22px、提交历史行高 24px，使用官方 Codicons，浅色、深色和高对比度主题均可使用。大量文件和提交采用虚拟滚动，列表只渲染可见行。
+界面按 VS Code 原生组件风格呈现，实时沿用主题提供的面板、列表、输入框、按钮、悬停、选中与焦点颜色，字体跟随 VS Code 设置，Diff 跟随编辑器字体。界面、命令、设置说明、错误和确认提示跟随 VS Code 显示语言：`zh-*` 使用简体中文，其他语言使用英文。仓库选择、历史筛选和上游分支使用自绘下拉菜单，支持方向键、Home/End 与首字母定位。提交图采用与 VS Code 源码管理视图一致的紧凑泳道、圆角连线和节点样式。文件行高 22px、提交历史行高 24px，使用官方 Codicons，浅色、深色和高对比度主题均可使用。大量文件和提交采用虚拟滚动，列表只渲染可见行。
 
 ## 日常工作流
 
@@ -133,7 +135,7 @@ Git 使用独立参数调用，文件路径使用字面路径匹配，不经过 
 
 ## 当前边界
 
-这是可安装的 0.5.4 版本，覆盖上述日常流程。尚未实现 IDEA 的逐行/逐块提交、交互式 Rebase、Shelf 补丁、Blame、远程仓库配置界面和 Git LFS 专用管理；子模块以文件状态展示，不提供独立管理视图。
+这是可安装的 0.5.5 版本，覆盖上述日常流程。尚未实现 IDEA 的逐行/逐块提交、交互式 Rebase、Shelf 补丁、Blame、远程仓库配置界面和 Git LFS 专用管理；子模块以文件状态展示，不提供独立管理视图。
 
 内嵌文本预览限制 1 MB；原生文本 Diff 最多 20 MB。历史二进制文件不提供原生比较。工作台展示磁盘内容，未保存的编辑在提交或 Stash 前保存。自动刷新在窗口聚焦且工作台可见时每 8 秒运行，保存文件和重新聚焦窗口也会刷新。
 

@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.5.5
+
+- 操作界面、命令、设置说明、Git 错误和原生确认提示支持英文，并跟随 VS Code 显示语言：`zh-*` 使用简体中文，其他语言使用英文。
+- 宿主与 Webview 共用 `src/shared/i18n.ts` 文案表；清单文案通过 `package.nls.json` 与 `package.nls.zh-cn.json` 提供。开发预览可用 `?lang=en` / `?lang=zh-cn` 切换界面语言。
+- 商店 README 截图改用可直连的 jsDelivr 镜像，修复部分网络环境下截图无法加载的问题。
+
 ## 0.5.4
 
 - 修复扩展更新后未重载的窗口点击 GitLoom 时报 `command 'gitWorkbench.workbench.focus' not found` 的问题：打开面板时在视图命令缺席的情况下回退到容器命令，两者都不可用时提示重载窗口。

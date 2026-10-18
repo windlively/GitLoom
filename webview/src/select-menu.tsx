@@ -9,6 +9,7 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import { Check, ChevronDown } from './icons';
+import { t } from './i18n';
 
 export type SelectOption = {
   value: string;
@@ -255,7 +256,7 @@ export function SelectMenu({
               </button>
             </Fragment>
           ))}
-          {!options.length && <div className="select-empty">没有可用选项</div>}
+          {!options.length && <div className="select-empty">{t('No options available')}</div>}
         </div>
       )}
     </>
