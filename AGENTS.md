@@ -31,7 +31,10 @@ GitLoom（织序）是 VS Code 扩展，借鉴 IntelliJ IDEA 的 Git 操作逻�
 | `webview/src/styles.css`、`icons.tsx`        | 主题样式及 Microsoft Codicons 图标适配                                   |
 | `webview/src/context-menu.tsx`、`resize.tsx` | 分支菜单、键盘操作与分栏调整                                             |
 | `webview/src/diff.ts`、`graph.ts`            | 文本差异行对齐与提交图算法                                               |
+| `webview/src/branch-groups.ts`               | 分支按命名空间前缀构建多层级目录，处理无前缀分支与远程名前缀             |
+| `webview/src/virtual.ts`                     | 文件列表与提交历史的虚拟滚动视口和可见范围计算                           |
 | `tests/git.test.ts`、`diff.test.ts`          | 真实临时仓库集成测试和 Diff/提交图算法测试                               |
+| `tests/branch-groups.test.ts`                | 分支前缀分组的本地、远程与多远程场景测试                                 |
 | `tests/host.ts`、`scripts/test-host.mjs`     | 使用隔离配置启动 VS Code 的宿主集成测试                                  |
 | `scripts/build.mjs`                          | 宿主、Webview、CSS 和字体打包                                            |
 | `resources/`                                 | 扩展图标与第三方许可证                                                   |
@@ -40,13 +43,12 @@ GitLoom（织序）是 VS Code 扩展，借鉴 IntelliJ IDEA 的 Git 操作逻�
 
 ## 命名与兼容性
 
-对外项目名和插件显示名是 **GitLoom**。下列旧标识为兼容已安装版本而保留，不要仅因品牌更名而重命名：
+对外项目名和插件显示名是 **GitLoom**，商店扩展 ID 为 `windlively.gitloom`（npm 包名 `gitloom`，publisher `windlively`）。早期本地 VSIX 使用过 `local-workbench.git-workbench`，商店版本不沿用该 ID。下列内部标识为兼容已保存设置和恢复中的面板而保留，不要仅因品牌更名而重命名：
 
-- npm 包名：`git-workbench`；publisher：`local-workbench`。
-- 扩展 ID：`local-workbench.git-workbench`。
 - 面板容器：`gitWorkbench`；视图 ID：`gitWorkbench.workbench`。
 - 命令和设置前缀：`gitWorkbench.*`。
 - 内容提供器 scheme：`git-workbench-preview`。
+- Webview 界面状态键：`git-workbench-ui`。
 
 修改这些标识、持久化状态结构或消息协议时，需要考虑现有安装、已保存设置和恢复中的面板，并提供兼容读取或迁移方案。
 

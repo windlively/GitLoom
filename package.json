@@ -1,9 +1,9 @@
 {
-  "name": "git-workbench",
+  "name": "gitloom",
   "displayName": "GitLoom",
-  "description": "VS Code 原生风格的紧凑 Git 底部面板，保留 IDEA 式更改列表和提交工作流。",
-  "version": "0.4.0",
-  "publisher": "local-workbench",
+  "description": "VS Code 原生风格的紧凑 Git 底部面板，IDEA 式更改列表、Diff 与提交工作流。A compact Git workbench for VS Code.",
+  "version": "0.5.4",
+  "publisher": "windlively",
   "license": "MIT",
   "repository": {
     "type": "git",
@@ -22,10 +22,14 @@
   ],
   "keywords": [
     "git",
+    "vscode",
+    "scm",
+    "source control",
     "idea",
     "changelist",
     "diff",
-    "git graph"
+    "git graph",
+    "gitloom"
   ],
   "main": "./dist/extension.cjs",
   "extensionKind": [
@@ -134,7 +138,7 @@
     "test": "tsx --test tests/*.test.ts",
     "test:host": "node scripts/test-host.mjs",
     "vscode:prepublish": "npm run check && npm run build",
-    "package": "vsce package --no-dependencies --out artifacts/gitloom-0.4.0.vsix"
+    "package": "vsce package --no-dependencies --out artifacts/gitloom-0.5.4.vsix"
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.46-24",
@@ -154,5 +158,10 @@
     "tsx": "^4.21.0",
     "typescript": "^5.7.0",
     "vite": "^6.4.0"
+  },
+  "icon": "resources/gitloom.png",
+  "galleryBanner": {
+    "color": "#2A1B3D",
+    "theme": "dark"
   }
 }
