@@ -101,6 +101,7 @@ export interface Requests {
     params: { paths: string[]; message: string; push?: boolean };
     result: { output: string; pushError?: string };
   };
+  stage: { params: { paths: string[] }; result: string };
   fetch: { params: Record<string, never>; result: string };
   pull: { params: Record<string, never>; result: string };
   push: { params: Record<string, never>; result: string };
@@ -131,6 +132,7 @@ export interface Requests {
   };
   cherryPick: { params: { hash: string }; result: string };
   revert: { params: { hash: string }; result: string };
+  reset: { params: { hash: string }; result: string };
   continueOperation: { params: Record<string, never>; result: string };
   abortOperation: { params: Record<string, never>; result: string };
 }

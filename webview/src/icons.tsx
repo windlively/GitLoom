@@ -50,6 +50,7 @@ export const History = icon('history');
 export const Info = icon('info');
 export const Layers = icon('archive');
 export const ListChecks = icon('source-control');
+export const ListTree = icon('list-tree');
 export const LoaderCircle = icon('loading');
 export const Maximize2 = icon('screen-full');
 export const Package = icon('package');

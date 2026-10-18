@@ -7,13 +7,15 @@ import type { Snapshot } from '../src/shared/types';
 
 export async function run() {
   const root = process.env.GIT_WORKBENCH_TEST_REPO!;
-  const extension = vscode.extensions.getExtension('local-workbench.git-workbench');
+  const extension = vscode.extensions.getExtension('windlively.gitloom');
   assert.ok(extension, 'development extension is discovered');
   const { workbench } = (await extension.activate()) as { workbench: Workbench };
   assert.equal(extension.isActive, true);
   const commands = await vscode.commands.getCommands(true);
   for (const command of ['gitWorkbench.open', 'gitWorkbench.commit', 'gitWorkbench.log', 'gitWorkbench.push'])
     assert.ok(commands.includes(command));
+  for (const command of ['gitWorkbench.workbench.focus', 'workbench.view.extension.gitWorkbench'])
+    assert.ok(commands.includes(command), `view command ${command} is registered`);
   assert.equal(extension.packageJSON.contributes.viewsContainers.panel[0].id, 'gitWorkbench');
   assert.equal(extension.packageJSON.contributes.viewsContainers.activitybar, undefined);
   assert.equal(extension.packageJSON.contributes.views.gitWorkbench[0].type, 'webview');

@@ -198,20 +198,98 @@ kbd {
   min-width: 80px;
   color: var(--fg);
 }
-.repo-selector select {
-  appearance: none;
+.repo-selector .select-trigger {
+  max-width: 190px;
   padding: 2px 3px;
-  background: transparent;
-  border: 1px solid transparent;
-  max-width: 155px;
-  cursor: pointer;
 }
-.repo-selector select:hover {
+.select-trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  height: 22px;
+  padding: 0 4px 0 5px;
+  border: 1px solid transparent;
+  border-radius: 2px;
+  background: transparent;
+  color: inherit;
+  font-size: 12px;
+  text-align: left;
+}
+.select-trigger:hover:not(:disabled) {
   background: var(--vscode-toolbar-hoverBackground, #5a5d5e50);
 }
-select option {
-  background: var(--vscode-dropdown-listBackground, var(--surface));
-  color: var(--vscode-dropdown-foreground, var(--fg));
+.select-trigger > .codicon {
+  flex: none;
+  opacity: 0.8;
+}
+.select-value {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.select-popup {
+  position: fixed;
+  z-index: 110;
+  display: flex;
+  flex-direction: column;
+  padding: 4px 0;
+  overflow: auto;
+  border: 1px solid var(--vscode-menu-border, var(--border-soft));
+  border-radius: 3px;
+  background: var(
+    --vscode-menu-background,
+    var(--vscode-dropdown-listBackground, var(--vscode-dropdown-background, #252526))
+  );
+  color: var(--vscode-menu-foreground, var(--fg));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, #0006);
+}
+.select-option {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 22px;
+  padding: 3px 10px;
+  color: inherit;
+  font-size: 12px;
+  text-align: left;
+  white-space: nowrap;
+}
+.select-option-label {
+  flex: 1;
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+.select-option > .codicon {
+  flex: none;
+}
+.select-option:hover:not(:disabled) {
+  color: var(--vscode-menu-selectionForeground, var(--selection-fg));
+  background: var(--vscode-menu-selectionBackground, var(--selection));
+}
+.select-option:focus-visible {
+  color: var(--vscode-menu-selectionForeground, var(--selection-fg));
+  background: var(--vscode-menu-selectionBackground, var(--selection));
+  outline: 1px solid var(--vscode-menu-selectionBorder, var(--vscode-contrastActiveBorder, transparent));
+  outline-offset: -1px;
+}
+.select-separator {
+  height: 1px;
+  margin: 4px 0;
+  background: var(--vscode-menu-separatorBackground, var(--border));
+}
+.select-empty {
+  padding: 4px 10px;
+  color: var(--muted);
+  font-size: 11px;
+}
+body.vscode-high-contrast .select-popup,
+body.vscode-high-contrast-light .select-popup {
+  border-color: var(--vscode-contrastBorder, var(--vscode-menu-border, var(--border)));
 }
 .current-branch {
   display: inline-flex;
@@ -426,6 +504,22 @@ select option {
   margin-left: auto;
   font-size: 11px;
 }
+.branch-folder-heading {
+  width: 100%;
+  text-align: left;
+}
+.branch-folder-heading:hover {
+  color: var(--fg);
+  background: var(--surface-hover);
+}
+.branch-folder-heading > .codicon {
+  flex-shrink: 0;
+}
+.branch-folder-heading > span {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
 .remote-heading {
   margin-top: 4px;
 }
@@ -557,6 +651,7 @@ select option {
   display: flex;
   align-items: center;
   gap: 5px;
+  height: 24px;
   min-height: 24px;
   padding: 0 7px 0 4px;
   font-size: 11px;
@@ -589,6 +684,12 @@ select option {
 }
 .file-row:hover {
   background: var(--surface-hover);
+}
+.file-row.marked {
+  background: var(
+    --vscode-list-inactiveSelectionBackground,
+    color-mix(in srgb, var(--selection) 55%, transparent)
+  );
 }
 .file-row.selected {
   background: var(--selection);
@@ -669,6 +770,21 @@ select option {
 .file-status.renamed {
   color: var(--vscode-gitDecoration-renamedResourceForeground, #73c991);
 }
+.stage-badge {
+  flex-shrink: 0;
+  padding: 0 4px;
+  border: 1px solid color-mix(in srgb, currentColor 45%, transparent);
+  border-radius: 3px;
+  color: var(--vscode-gitDecoration-addedResourceForeground, var(--green));
+  font-size: 10px;
+  line-height: 14px;
+}
+.stage-badge.partial {
+  color: var(--vscode-charts-orange, #d18616);
+}
+.file-row.selected .stage-badge {
+  color: inherit;
+}
 .selection-summary {
   grid-column: 1;
   grid-row: 4;
@@ -686,6 +802,10 @@ select option {
 .selection-summary b {
   font-weight: 400;
   color: var(--fg);
+}
+.selection-summary em {
+  font-style: normal;
+  opacity: 0.8;
 }
 .diff-stat {
   display: inline-flex;
@@ -1120,14 +1240,17 @@ select option {
   flex: 1;
   max-width: 360px;
 }
-.filter-select {
+.filter-select.select-trigger {
+  flex: none;
   max-width: 180px;
-  font-size: 12px;
   height: 24px;
   padding: 0 5px;
   border: 1px solid var(--vscode-dropdown-border, transparent);
   background: var(--vscode-dropdown-background, #313131);
   color: var(--vscode-dropdown-foreground, var(--fg));
+}
+.filter-select.select-trigger[aria-expanded='true'] {
+  border-color: var(--accent);
 }
 .history-count {
   font-size: 11px;
@@ -1510,22 +1633,120 @@ select option {
   padding: 8px;
   background: transparent;
 }
+.dialog-shell {
+  position: relative;
+  display: flex;
+  min-width: 0;
+  max-width: 100%;
+}
+.dialog-shell.framed {
+  position: absolute;
+  max-width: none;
+}
+.dialog-shell > .modal {
+  width: 100%;
+}
+.dialog-shell.framed > .modal {
+  height: 100%;
+  max-height: none;
+}
 .modal {
-  width: 480px;
   max-width: 100%;
   max-height: calc(100vh - 16px);
   overflow: auto;
   border-radius: 3px;
   background: var(--vscode-quickInput-background, #222222);
   color: var(--vscode-quickInput-foreground, var(--fg));
-  border: 1px solid var(--vscode-widget-border, var(--vscode-contrastBorder, #454545));
   box-shadow: 0 2px 8px var(--vscode-widget-shadow, #00000066);
+}
+body.vscode-high-contrast .modal,
+body.vscode-high-contrast-light .modal {
+  border: 1px solid var(--vscode-contrastBorder, var(--vscode-widget-border, #6fc3df));
+}
+.dialog-resize {
+  position: absolute;
+  z-index: 5;
+  touch-action: none;
+}
+.dialog-resize.n,
+.dialog-resize.s {
+  left: 8px;
+  right: 8px;
+  height: 6px;
+  cursor: ns-resize;
+}
+.dialog-resize.n {
+  top: -3px;
+}
+.dialog-resize.s {
+  bottom: -3px;
+}
+.dialog-resize.e,
+.dialog-resize.w {
+  top: 8px;
+  bottom: 8px;
+  width: 6px;
+  cursor: ew-resize;
+}
+.dialog-resize.e {
+  right: -3px;
+}
+.dialog-resize.w {
+  left: -3px;
+}
+.dialog-resize.ne,
+.dialog-resize.nw,
+.dialog-resize.se,
+.dialog-resize.sw {
+  width: 12px;
+  height: 12px;
+}
+.dialog-resize.ne {
+  top: -3px;
+  right: -3px;
+  cursor: nesw-resize;
+}
+.dialog-resize.nw {
+  top: -3px;
+  left: -3px;
+  cursor: nwse-resize;
+}
+.dialog-resize.se {
+  right: -3px;
+  bottom: -3px;
+  cursor: nwse-resize;
+}
+.dialog-resize.sw {
+  bottom: -3px;
+  left: -3px;
+  cursor: nesw-resize;
+}
+.dialog-resize.se::after {
+  content: '';
+  position: absolute;
+  right: 5px;
+  bottom: 5px;
+  width: 5px;
+  height: 5px;
+  border-right: 1px solid var(--muted);
+  border-bottom: 1px solid var(--muted);
+  opacity: 0.6;
+  pointer-events: none;
+}
+.dialog-resize.se:hover::after {
+  opacity: 1;
 }
 .modal-header {
   display: flex;
   align-items: center;
   gap: 7px;
   padding: 8px 12px;
+  cursor: grab;
+  touch-action: none;
+  user-select: none;
+}
+.modal-header:active {
+  cursor: grabbing;
 }
 .modal-icon {
   display: flex;
@@ -1549,12 +1770,15 @@ select option {
   font-size: 11px;
 }
 .modal-footer {
+  position: sticky;
+  bottom: 0;
+  z-index: 1;
   display: flex;
   justify-content: flex-end;
   align-items: center;
   gap: 6px;
   padding: 8px 12px;
-  border-top: 1px solid var(--border);
+  background: var(--vscode-quickInput-background, #222222);
 }
 .modal-footer > .muted {
   font-size: 11px;
@@ -1774,6 +1998,8 @@ body.vscode-high-contrast-light * {
 }
 body.vscode-high-contrast .file-row.selected,
 body.vscode-high-contrast-light .file-row.selected,
+body.vscode-high-contrast .file-row.marked,
+body.vscode-high-contrast-light .file-row.marked,
 body.vscode-high-contrast .log-row.selected,
 body.vscode-high-contrast-light .log-row.selected {
   outline: 1px solid var(--vscode-contrastActiveBorder, var(--accent));
@@ -1789,6 +2015,9 @@ body.vscode-high-contrast-light .log-row.selected {
   .history-count {
     display: none;
   }
+  .stage-badge {
+    display: none;
+  }
 
   .log-author {
     width: 85px;
@@ -1802,8 +2031,8 @@ body.vscode-high-contrast-light .log-row.selected {
     gap: 4px;
     padding: 0 5px;
   }
-  .repo-selector select {
-    max-width: 100px;
+  .repo-selector .select-trigger {
+    max-width: 125px;
   }
   .current-branch > span {
     max-width: 105px;
@@ -1851,8 +2080,8 @@ body.vscode-high-contrast-light .log-row.selected {
     padding: 0 4px;
     gap: 4px;
   }
-  .repo-selector select {
-    max-width: 80px;
+  .repo-selector .select-trigger {
+    max-width: 100px;
   }
 
   .commit-caption {
@@ -1983,85 +2212,111 @@ body.vscode-high-contrast-light {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
-.branch-modal {
-  width: 470px;
+.branch-dropdown {
+  position: fixed;
+  z-index: 90;
   display: flex;
   flex-direction: column;
-  overflow: hidden;
-}
-.branch-modal .modal-header,
-.branch-modal .modal-footer {
-  flex-shrink: 0;
-}
-.branch-modal .modal-footer {
-  justify-content: flex-start;
-  flex-wrap: wrap;
-}
-.branch-picker-search {
-  margin: 0 10px 5px;
-  min-height: 26px;
-  flex-shrink: 0;
-}
-.branch-picker {
-  overflow: auto;
   min-height: 0;
-  flex: 1;
-  padding-bottom: 5px;
+  overflow: hidden;
+  border-radius: 3px;
+  border: 1px solid var(--vscode-menu-border, var(--border));
+  background: var(--vscode-menu-background, var(--vscode-quickInput-background, #252526));
+  color: var(--vscode-menu-foreground, var(--fg));
+  box-shadow: 0 2px 8px var(--vscode-widget-shadow, #0006);
 }
-.branch-picker-heading {
-  padding: 5px 12px 3px;
+.branch-dropdown > .search-box {
+  flex: none;
+  margin: 6px 6px 3px;
+}
+.branch-dropdown-list {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+  padding: 2px 0 4px;
+}
+.branch-dropdown-heading {
+  padding: 5px 10px 3px;
   font-size: 11px;
   font-weight: 600;
   color: var(--muted);
 }
-.branch-picker-name {
+.branch-dropdown-name {
   width: 100%;
   display: flex;
   align-items: center;
   gap: 8px;
-  padding: 4px 12px;
+  padding: 4px 10px;
   min-height: 36px;
   text-align: left;
 }
-.branch-picker-name:hover,
-.branch-picker-name:focus-visible {
-  background: var(--selection);
-  color: var(--selection-fg);
+.branch-dropdown-name:hover,
+.branch-dropdown-name:focus-visible,
+.branch-dropdown-name.active {
+  background: var(--vscode-menu-selectionBackground, var(--selection));
+  color: var(--vscode-menu-selectionForeground, var(--selection-fg));
   outline-offset: -1px;
 }
-.branch-picker-text {
+.branch-dropdown-text {
   flex: 1;
   min-width: 0;
   display: flex;
   flex-direction: column;
   gap: 2px;
 }
-.branch-picker-text strong,
-.branch-picker-text small {
+.branch-dropdown-text strong,
+.branch-dropdown-text small {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
   font-weight: 400;
 }
-.branch-picker-text small {
+.branch-dropdown-text small {
   font-size: 11px;
   color: var(--muted);
 }
-.branch-picker-name > .codicon {
+.branch-dropdown-name:hover .branch-dropdown-text small,
+.branch-dropdown-name:focus-visible .branch-dropdown-text small,
+.branch-dropdown-name.active .branch-dropdown-text small,
+.branch-dropdown-name:hover .tag,
+.branch-dropdown-name:focus-visible .tag,
+.branch-dropdown-name.active .tag {
+  color: inherit;
+}
+.branch-dropdown-name > .codicon {
   flex-shrink: 0;
+}
+.branch-dropdown-footer {
+  flex: none;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 8px;
+  border-top: 1px solid var(--vscode-menu-separatorBackground, var(--border));
+}
+.branch-dropdown-footer .muted {
+  flex: 1;
+  min-width: 0;
+  font-size: 11px;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
 }
 .tag {
   flex-shrink: 0;
   color: var(--muted);
   font-size: 11px;
 }
-.form-label select {
+.form-label .select-trigger {
   height: 26px;
   width: 100%;
   padding: 3px 6px;
   border: 1px solid var(--vscode-dropdown-border, var(--border));
   background: var(--vscode-dropdown-background, var(--bg));
   color: var(--vscode-dropdown-foreground, var(--fg));
+}
+.form-label .select-trigger[aria-expanded='true'] {
+  border-color: var(--accent);
 }
 .modal-header {
   position: sticky;

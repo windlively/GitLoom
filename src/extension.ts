@@ -10,6 +10,7 @@ const METHODS: Method[] = [
   'diff',
   'commitDetail',
   'commit',
+  'stage',
   'fetch',
   'pull',
   'push',
@@ -37,6 +38,7 @@ const METHODS: Method[] = [
   'changelist',
   'cherryPick',
   'revert',
+  'reset',
   'continueOperation',
   'abortOperation',
 ];
@@ -55,6 +57,9 @@ const READ_ONLY = new Set<Method>([
   'pickRepository',
 ]);
 export const WORKBENCH_VIEW_ID = 'gitWorkbench.workbench';
+// Windows kept open across an extension update can lack the generated view focus command.
+const WORKBENCH_CONTAINER_COMMAND = 'workbench.view.extension.gitWorkbench';
+const fingerprint = (state: Snapshot) => JSON.stringify({ ...state, updatedAt: 0 });
 
 export async function activate(context: vscode.ExtensionContext) {
   const workbench = new Workbench(context);
@@ -107,7 +112,13 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
   private services = new Map<string, GitService>();
   private disposables: vscode.Disposable[] = [];
   private timer?: ReturnType<typeof setTimeout>;
+  private scheduledForce = false;
   private refreshing = false;
+  private refreshQueued: boolean | undefined;
+  private posted = '';
+  private discovery?: Promise<void>;
+  private gitWatched = false;
+  private gitActivating = false;
   private webviewReady = false;
   private pendingPush = false;
   private readonly documents = new Map<string, string>();
@@ -131,19 +142,20 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         }
       }),
     );
-    this.disposables.push(vscode.workspace.onDidSaveTextDocument(() => this.scheduleRefresh()));
+    this.disposables.push(vscode.workspace.onDidSaveTextDocument(() => this.scheduleRefresh(true)));
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
-        void this.discover().then(() => this.refresh());
+        void this.discover(true).then(() => this.refresh(true));
       }),
     );
     this.disposables.push(
       vscode.window.onDidChangeWindowState((state) => {
-        if (state.focused) this.scheduleRefresh();
+        if (state.focused) this.scheduleRefresh(true);
       }),
     );
+    // Polling only pushes snapshots that differ, so an idle panel does not re-render every few seconds.
     const poll = setInterval(() => {
-      if (this.panel?.visible && vscode.window.state.focused) this.scheduleRefresh();
+      if (this.panel?.visible && vscode.window.state.focused) this.scheduleRefresh(false);
     }, 8000);
     this.disposables.push({ dispose: () => clearInterval(poll) });
   }
@@ -155,29 +167,55 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
   post(message: unknown) {
     void this.panel?.webview.postMessage(message);
   }
-  private scheduleRefresh() {
+  private scheduleRefresh(force: boolean) {
     clearTimeout(this.timer);
+    this.scheduledForce ||= force;
     this.timer = setTimeout(() => {
-      void this.refresh();
+      const forced = this.scheduledForce;
+      this.scheduledForce = false;
+      void this.refresh(forced);
     }, 650);
   }
 
-  private async discover() {
+  private discover(force = false): Promise<void> {
+    if (force || !this.discovery) this.discovery = this.scan();
+    return this.discovery;
+  }
+  private async scan() {
     const roots = new Set<string>();
-    for (const folder of vscode.workspace.workspaceFolders || []) {
-      const root = await GitService.discover(folder.uri.fsPath, this.executable);
-      if (root) roots.add(root);
-    }
-    // The built-in Git extension also discovers nested and multi-root repositories.
+    const found = await Promise.all(
+      (vscode.workspace.workspaceFolders || []).map((folder) =>
+        GitService.discover(folder.uri.fsPath, this.executable),
+      ),
+    );
+    for (const root of found) if (root) roots.add(root);
+    // The built-in Git extension also discovers nested and multi-root repositories. Waiting for its
+    // activation would delay the first snapshot, so its repositories are merged in once it is ready.
     const gitExtension = vscode.extensions.getExtension('vscode.git');
-    try {
-      const git = await gitExtension?.activate();
-      for (const repo of git?.getAPI(1)?.repositories || []) {
-        const root = await GitService.discover(repo.rootUri.fsPath, this.executable);
-        if (root) roots.add(root);
+    if (gitExtension?.isActive) {
+      try {
+        const api = gitExtension.exports?.getAPI(1);
+        if (api && !this.gitWatched) {
+          this.gitWatched = true;
+          this.disposables.push(
+            api.onDidOpenRepository(() => void this.discover(true).then(() => this.refresh(true))),
+          );
+        }
+        const nested = await Promise.all(
+          (api?.repositories || []).map((repo: { rootUri: vscode.Uri }) =>
+            GitService.discover(repo.rootUri.fsPath, this.executable),
+          ),
+        );
+        for (const root of nested) if (root) roots.add(root);
+      } catch {
+        /* Workspace folders remain available if built-in Git is disabled. */
       }
-    } catch {
-      /* Workspace folders remain available if built-in Git is disabled. */
+    } else if (gitExtension && !this.gitActivating) {
+      this.gitActivating = true;
+      void Promise.resolve(gitExtension.activate()).then(
+        () => this.discover(true).then(() => this.refresh(true)),
+        () => undefined,
+      );
     }
     for (const repository of this.repositories) roots.add(repository.path);
     this.repositories = [...roots].map((root) => ({ path: root, name: path.basename(root) }));
@@ -201,6 +239,28 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
     void this.context.workspaceState.update('repository', root);
   }
 
+  private async reveal(panel?: vscode.WebviewView) {
+    const commands = await vscode.commands.getCommands(true);
+    const focus = `${WORKBENCH_VIEW_ID}.focus`;
+    if (commands.includes(focus)) {
+      try {
+        await vscode.commands.executeCommand(focus);
+        return;
+      } catch {
+        // A window opened before the extension was updated can keep a stale view registry.
+      }
+    }
+    if (panel) {
+      panel.show(false);
+      return;
+    }
+    if (commands.includes(WORKBENCH_CONTAINER_COMMAND)) {
+      await vscode.commands.executeCommand(WORKBENCH_CONTAINER_COMMAND);
+      return;
+    }
+    throw new Error('GitLoom 视图尚未注册，请重载 VS Code 窗口后重试。');
+  }
+
   async open(view: View, push = false) {
     this.requestedView = view;
     this.pendingView = view;
@@ -216,7 +276,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         });
     let panel: vscode.WebviewView;
     try {
-      await vscode.commands.executeCommand(`${WORKBENCH_VIEW_ID}.focus`);
+      await this.reveal(this.panel);
       panel = await resolved;
     } finally {
       clearTimeout(timer);
@@ -267,9 +327,10 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
     );
     this.viewDisposables.push(
       panel.onDidChangeVisibility(() => {
-        if (panel.visible) this.scheduleRefresh();
+        if (panel.visible) this.scheduleRefresh(true);
       }),
     );
+    this.posted = '';
     panel.webview.html = this.html(panel.webview, this.requestedView);
     await this.discover();
     for (const resolve of this.viewWaiters) resolve(panel);
@@ -283,7 +344,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private async snapshot(): Promise<Snapshot> {
-    await this.discover();
+    await this.discover(!this.service);
     if (!this.service)
       return {
         repositories: this.repositories,
@@ -317,15 +378,28 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       changelists: this.changelists(git.root),
     };
   }
-  private async refresh() {
-    if (!this.panel || this.refreshing) return;
+  private async refresh(force = true) {
+    if (!this.panel) return;
+    if (this.refreshing) {
+      this.refreshQueued = this.refreshQueued || force;
+      return;
+    }
     this.refreshing = true;
     try {
-      const state = await this.snapshot();
-      if (state.repository?.path === this.service?.root) this.post({ type: 'snapshot', snapshot: state });
+      for (let next: boolean | undefined = force; next !== undefined && this.panel;) {
+        this.refreshQueued = undefined;
+        const state = await this.snapshot();
+        const key = fingerprint(state);
+        if (state.repository?.path === this.service?.root && (next || key !== this.posted)) {
+          this.posted = key;
+          this.post({ type: 'snapshot', snapshot: state });
+        }
+        next = this.refreshQueued;
+      }
     } catch (error) {
       this.post({ type: 'error', message: (error as Error).message });
     } finally {
+      this.refreshQueued = undefined;
       this.refreshing = false;
     }
   }
@@ -358,7 +432,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
     } catch (error) {
       this.post({ type: 'response', id: request.id, error: (error as Error).message });
     } finally {
-      if (!READ_ONLY.has(method) || method === 'pickRepository') await this.refresh();
+      if (!READ_ONLY.has(method) || method === 'pickRepository') await this.refresh(false);
     }
   }
 
@@ -391,9 +465,13 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       return params.paths as string[];
     };
     if (method === 'snapshot') {
-      await this.discover();
-      if (params.repository) this.selectRepository(string('repository'));
-      return this.snapshot();
+      if (params.repository) {
+        await this.discover();
+        this.selectRepository(string('repository'));
+      }
+      const state = await this.snapshot();
+      this.posted = fingerprint(state);
+      return state;
     }
     if (method === 'pickRepository') {
       const selection = await vscode.window.showOpenDialog({
@@ -433,6 +511,8 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         }
         return { output: result };
       }
+      case 'stage':
+        return git.stage(paths());
       case 'fetch':
         return git.fetch();
       case 'pull':
@@ -568,6 +648,18 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         )
           return git.revert(hash);
         throw new Error('已取消还原提交。');
+      }
+      case 'reset': {
+        const hash = string('hash');
+        if (
+          await this.confirm(
+            `强制重置当前分支到提交 ${hash.slice(0, 8)}？`,
+            '强制重置',
+            '当前分支将指向该提交，暂存区和工作区中已跟踪的更改会被丢弃，未跟踪文件保留。此操作无法撤销。',
+          )
+        )
+          return git.reset(hash);
+        throw new Error('已取消强制重置。');
       }
       case 'continueOperation':
         return git.continueOperation();

@@ -12,14 +12,20 @@ export function ContextMenu({
   x,
   y,
   title,
+  label,
   actions,
   close,
+  onSelect,
+  onCancel,
 }: {
   x: number;
   y: number;
   title: string;
+  label?: string;
   actions: MenuAction[];
   close: () => void;
+  onSelect?: () => void;
+  onCancel?: () => void;
 }) {
   const menu = useRef<HTMLDivElement>(null);
   const [position, setPosition] = useState({ left: x, top: y });
@@ -50,7 +56,7 @@ export function ContextMenu({
       ref={menu}
       className="branch-context-menu"
       role="menu"
-      aria-label={`分支 ${title} 操作`}
+      aria-label={label || `分支 ${title} 操作`}
       style={position}
       onContextMenu={(event) => event.preventDefault()}
       onKeyDown={(event) => {
@@ -58,6 +64,7 @@ export function ContextMenu({
           event.preventDefault();
           event.stopPropagation();
           close();
+          onCancel?.();
           return;
         }
         if (!['ArrowUp', 'ArrowDown', 'Home', 'End'].includes(event.key)) return;
@@ -85,6 +92,7 @@ export function ContextMenu({
             className={action.danger ? 'danger' : ''}
             onClick={() => {
               close();
+              onSelect?.();
               action.run();
             }}
           >

@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { createRoot } from 'react-dom/client';
 import {
   ArrowDown,
@@ -34,6 +34,7 @@ import {
   Info,
   Layers,
   ListChecks,
+  ListTree,
   LoaderCircle,
   Maximize2,
   Package,
@@ -65,31 +66,36 @@ import type {
 } from '../../src/shared/types';
 import { isPreview, loadState, request, saveState, setRepository, subscribe } from './bridge';
 import { makeDiffRows } from './diff';
-import { COMMIT_ROW_HEIGHT, graphColors, makeGraph } from './graph';
+import { COMMIT_ROW_HEIGHT, makeGraph } from './graph';
 import { defaultSizes, restoreSizes, ResizeHandle, type PaneSizes } from './resize';
+import { DialogWindow, restoreDialogFrames, type DialogFrame } from './dialog-window';
+import { BranchDropdown } from './branch-dropdown';
+import { groupBranches, type BranchFolder } from './branch-groups';
 import { ContextMenu, type MenuAction } from './context-menu';
+import { SelectMenu, type SelectOption } from './select-menu';
+import { offsetRange, uniformRange, useViewport } from './virtual';
 import './styles.css';
 
 if (isPreview && new URLSearchParams(window.location.search).get('layout') === 'panel') {
   document.body.dataset.host = 'panel';
 }
 const panelLayout = true;
+const FILE_ROW_HEIGHT = 22,
+  GROUP_ROW_HEIGHT = 24;
+const NO_CHANGES: Change[] = [];
 
 type Dialog = {
   type:
-    | 'branch'
-    | 'newBranch'
-    | 'renameBranch'
-    | 'upstream'
-    | 'compare'
-    | 'changelist'
-    | 'stash'
-    | 'push'
-    | 'move'
-    | 'help';
+    'newBranch' | 'renameBranch' | 'upstream' | 'compare' | 'changelist' | 'stash' | 'push' | 'move' | 'help';
   branch?: Branch;
 };
-type Stored = { view: View; drafts: Record<string, string>; sizes?: Partial<PaneSizes> };
+type Stored = {
+  view: View;
+  drafts: Record<string, string>;
+  sizes?: Partial<PaneSizes>;
+  dialogs?: Record<string, DialogFrame>;
+  branchGrouped?: boolean;
+};
 const stored = loadState<Stored>({
   view: (document.body.dataset.initialView as View) || 'changes',
   drafts: {},
@@ -110,6 +116,15 @@ const statusLetters = {
   untracked: 'U',
   conflict: '!',
 };
+const stageState = (change: Change): 'staged' | 'partial' | '' =>
+  change.status === 'conflict' ||
+  change.status === 'untracked' ||
+  change.index === ' ' ||
+  change.index === '?'
+    ? ''
+    : change.worktree === ' '
+      ? 'staged'
+      : 'partial';
 const basename = (file: string) => file.split('/').at(-1) || file;
 const dirname = (file: string) => file.split('/').slice(0, -1).join('/');
 const shortDate = (date: string) =>
@@ -426,12 +441,38 @@ function App() {
   const [sizes, setSizes] = useState(() => restoreSizes(stored.sizes));
   const resize = (key: keyof PaneSizes) => (value: number) =>
     setSizes((previous) => ({ ...previous, [key]: value }));
-  const [branchMenu, setBranchMenu] = useState<{ branch: Branch; x: number; y: number } | null>(null);
+  const [dialogFrames, setDialogFrames] = useState<Record<string, DialogFrame>>(() =>
+    restoreDialogFrames(stored.dialogs),
+  );
+  const rememberDialogFrame = useCallback((type: Dialog['type'], frame?: DialogFrame) => {
+    setDialogFrames((previous) => {
+      if (!frame) {
+        if (!(type in previous)) return previous;
+        const next = { ...previous };
+        delete next[type];
+        return next;
+      }
+      return { ...previous, [type]: frame };
+    });
+  }, []);
+  const [branchMenu, setBranchMenu] = useState<{
+    branch: Branch;
+    x: number;
+    y: number;
+    fromDropdown?: boolean;
+  } | null>(null);
   const closeBranchMenu = useCallback(() => setBranchMenu(null), []);
+  const [commitMenu, setCommitMenu] = useState<{ commit: Commit; x: number; y: number } | null>(null);
+  const closeCommitMenu = useCallback(() => setCommitMenu(null), []);
+  const [branchDropdown, setBranchDropdown] = useState<HTMLButtonElement | null>(null);
   const [comparison, setComparison] = useState<BranchComparison | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [view, setView] = useState<View>(stored.view);
   const [selected, setSelected] = useState<Set<string>>(new Set());
+  const [fileSelection, setFileSelection] = useState<Set<string>>(new Set());
+  const fileSelectionAnchor = useRef('');
+  const [fileMenu, setFileMenu] = useState<{ paths: string[]; x: number; y: number } | null>(null);
+  const closeFileMenu = useCallback(() => setFileMenu(null), []);
   const [activeFile, setActiveFile] = useState('');
   const [diff, setDiff] = useState<FileDiff | null>(null),
     [diffLoading, setDiffLoading] = useState(false);
@@ -449,6 +490,8 @@ function App() {
   const [branchFilter, setBranchFilter] = useState(''),
     [activeCommit, setActiveCommit] = useState(''),
     [detail, setDetail] = useState<CommitDetail | null>(null);
+  const [branchGrouped, setBranchGrouped] = useState(stored.branchGrouped === true);
+  const [collapsedBranchFolders, setCollapsedBranchFolders] = useState<Set<string>>(new Set());
   const [historyFile, setHistoryFile] = useState(''),
     [activeStash, setActiveStash] = useState(''),
     [stashFiles, setStashFiles] = useState<Change[]>([]);
@@ -458,8 +501,10 @@ function App() {
   const root = useRef<string | undefined>(undefined),
     diffSequence = useRef(0),
     commitInput = useRef<HTMLTextAreaElement>(null);
+  const fileViewport = useViewport(),
+    logViewport = useViewport();
   const currentDraft = drafts[snapshot?.repository?.path || ''] || '';
-  const changes = snapshot?.changes || [];
+  const changes = snapshot?.changes ?? NO_CHANGES;
   const isBusy = !!busy;
   const applySnapshot = useCallback((state: Snapshot) => {
     const changedRepository = root.current !== state.repository?.path;
@@ -474,6 +519,9 @@ function App() {
         ),
       );
       setActiveFile(state.changes[0]?.path || '');
+      setFileSelection(new Set());
+      fileSelectionAnchor.current = '';
+      setFileMenu(null);
       setActiveCommit(state.commits[0]?.hash || '');
       setBranchFilter('');
       setActiveStash(state.stashes[0]?.ref || '');
@@ -482,13 +530,10 @@ function App() {
       setActivities([]);
       setDiff(null);
     } else {
-      setSelected(
-        (previous) =>
-          new Set([...previous].filter((file) => state.changes.some((change) => change.path === file))),
-      );
-      setActiveFile((previous) =>
-        state.changes.some((change) => change.path === previous) ? previous : state.changes[0]?.path || '',
-      );
+      const paths = new Set(state.changes.map((change) => change.path));
+      setSelected((previous) => new Set([...previous].filter((file) => paths.has(file))));
+      setActiveFile((previous) => (paths.has(previous) ? previous : state.changes[0]?.path || ''));
+      setFileSelection((previous) => new Set([...previous].filter((file) => paths.has(file))));
       setActiveCommit((previous) =>
         state.commits.some((commit) => commit.hash === previous) ? previous : state.commits[0]?.hash || '',
       );
@@ -496,7 +541,15 @@ function App() {
         state.stashes.some((stash) => stash.ref === previous) ? previous : state.stashes[0]?.ref || '',
       );
     }
-    setSnapshot(state);
+    // Reusing an identical history keeps the memoized commit graph when only working files changed.
+    setSnapshot((previous) =>
+      previous &&
+      !changedRepository &&
+      previous.commits.length === state.commits.length &&
+      JSON.stringify(previous.commits) === JSON.stringify(state.commits)
+        ? { ...state, commits: previous.commits }
+        : state,
+    );
   }, []);
   const refresh = useCallback(
     async (repository?: string) => {
@@ -526,8 +579,8 @@ function App() {
     });
   }, [refresh, applySnapshot]);
   useEffect(() => {
-    saveState({ view, drafts, sizes });
-  }, [view, drafts, sizes]);
+    saveState({ view, drafts, sizes, dialogs: dialogFrames, branchGrouped });
+  }, [view, drafts, sizes, dialogFrames, branchGrouped]);
   useEffect(() => {
     if (!notice || notice.error) return;
     const timer = setTimeout(() => setNotice(null), 4500);
@@ -695,17 +748,24 @@ function App() {
         if (sequence === diffSequence.current) setDiffLoading(false);
       });
   }, [diffFile, view, activeCommit, activeStash, snapshot?.updatedAt, snapshot?.repository?.path]);
-  const commit = (push = false) => {
-    if (!selected.size || !currentDraft.trim()) return;
-    void perform(
-      'commit',
-      { paths: [...selected], message: currentDraft, push },
-      push ? '提交并推送' : '提交',
-      () => {
-        setDrafts((previous) => ({ ...previous, [snapshot!.repository!.path]: '' }));
-      },
-    );
+  const commitPaths = (paths: string[], push = false) => {
+    if (!paths.length || isBusy) return;
+    setSelected(new Set(paths));
+    if (!currentDraft.trim()) {
+      commitInput.current?.focus();
+      setNotice({ message: '请先填写提交说明。', error: true });
+      return;
+    }
+    const chosen = new Set(paths);
+    if (changes.some((change) => change.status === 'conflict' && chosen.has(change.path))) {
+      setNotice({ message: '请先解决所有冲突。', error: true });
+      return;
+    }
+    void perform('commit', { paths, message: currentDraft, push }, push ? '提交并推送' : '提交', () => {
+      setDrafts((previous) => ({ ...previous, [snapshot!.repository!.path]: '' }));
+    });
   };
+  const commit = (push = false) => commitPaths([...selected], push);
   useEffect(() => {
     const handle = (event: KeyboardEvent) => {
       if (event.key === 'Escape' && !isBusy) setDialog(null);
@@ -748,38 +808,120 @@ function App() {
       });
       return next;
     });
-  const filteredChanges = changes.filter((change) =>
-    change.path.toLowerCase().includes(fileQuery.toLowerCase()),
+  const filteredChanges = useMemo(() => {
+    const query = fileQuery.toLowerCase();
+    return query ? changes.filter((change) => change.path.toLowerCase().includes(query)) : changes;
+  }, [changes, fileQuery]);
+  const changelists = snapshot?.changelists;
+  const groups = useMemo(() => {
+    const lists = (changelists || []).map((list) => ({ ...list, members: new Set(list.paths) }));
+    const listed = new Set(lists.flatMap((list) => list.paths));
+    return [
+      {
+        id: 'conflicts',
+        name: '合并冲突',
+        files: filteredChanges.filter((change) => change.status === 'conflict'),
+      },
+      {
+        id: 'default',
+        name: '默认更改列表',
+        files: filteredChanges.filter(
+          (change) =>
+            change.status !== 'untracked' && change.status !== 'conflict' && !listed.has(change.path),
+        ),
+      },
+      ...lists.map((list) => ({
+        id: list.id,
+        name: list.name,
+        files: filteredChanges.filter(
+          (change) => list.members.has(change.path) && change.status !== 'conflict',
+        ),
+      })),
+      {
+        id: 'untracked',
+        name: '未版本化的文件',
+        files: filteredChanges.filter((change) => change.status === 'untracked' && !listed.has(change.path)),
+      },
+    ].filter((group) => group.files.length || (!['conflicts', 'untracked'].includes(group.id) && !fileQuery));
+  }, [filteredChanges, changelists, fileQuery]);
+  const visibleFilePaths = useMemo(
+    () =>
+      groups.flatMap((group) => (collapsed.has(group.id) ? [] : group.files.map((change) => change.path))),
+    [groups, collapsed],
   );
-  const listedPaths = new Set(snapshot?.changelists.flatMap((list) => list.paths));
-  const groups = [
-    {
-      id: 'conflicts',
-      name: '合并冲突',
-      files: filteredChanges.filter((change) => change.status === 'conflict'),
-    },
-    {
-      id: 'default',
-      name: '默认更改列表',
-      files: filteredChanges.filter(
-        (change) => !['untracked', 'conflict'].includes(change.status) && !listedPaths.has(change.path),
-      ),
-    },
-    ...(snapshot?.changelists || []).map((list) => ({
-      id: list.id,
-      name: list.name,
-      files: filteredChanges.filter(
-        (change) => list.paths.includes(change.path) && change.status !== 'conflict',
-      ),
-    })),
-    {
-      id: 'untracked',
-      name: '未版本化的文件',
-      files: filteredChanges.filter(
-        (change) => change.status === 'untracked' && !listedPaths.has(change.path),
-      ),
-    },
-  ].filter((group) => group.files.length || (!['conflicts', 'untracked'].includes(group.id) && !fileQuery));
+  const fileItems = useMemo(() => {
+    const items: ({ kind: 'group'; group: (typeof groups)[number] } | { kind: 'file'; change: Change })[] =
+      [];
+    const offsets = [0];
+    for (const group of groups) {
+      items.push({ kind: 'group', group });
+      offsets.push(offsets.at(-1)! + GROUP_ROW_HEIGHT);
+      if (collapsed.has(group.id)) continue;
+      for (const change of group.files) {
+        items.push({ kind: 'file', change });
+        offsets.push(offsets.at(-1)! + FILE_ROW_HEIGHT);
+      }
+    }
+    return { items, offsets };
+  }, [groups, collapsed]);
+  const [fileStart, fileEnd] = offsetRange(fileItems.offsets, fileViewport);
+  const selectFileRow = (
+    path: string,
+    modifiers?: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean },
+  ) => {
+    setActiveFile(path);
+    if (modifiers?.shiftKey && fileSelectionAnchor.current) {
+      const from = visibleFilePaths.indexOf(fileSelectionAnchor.current);
+      const to = visibleFilePaths.indexOf(path);
+      if (from >= 0 && to >= 0) {
+        const range = visibleFilePaths.slice(Math.min(from, to), Math.max(from, to) + 1);
+        const additive = modifiers.metaKey || modifiers.ctrlKey;
+        setFileSelection((previous) => new Set(additive ? [...previous, ...range] : range));
+        return;
+      }
+    }
+    if (modifiers?.metaKey || modifiers?.ctrlKey) {
+      fileSelectionAnchor.current = path;
+      setFileSelection((previous) => {
+        const next = new Set(previous);
+        next.has(path) ? next.delete(path) : next.add(path);
+        return next;
+      });
+      return;
+    }
+    fileSelectionAnchor.current = path;
+    setFileSelection(new Set([path]));
+  };
+  const openFileMenu = (change: Change, x: number, y: number) => {
+    const paths = fileSelection.has(change.path) ? [...fileSelection] : [change.path];
+    if (!fileSelection.has(change.path)) {
+      fileSelectionAnchor.current = change.path;
+      setFileSelection(new Set([change.path]));
+    }
+    setActiveFile(change.path);
+    setFileMenu({ paths, x, y });
+  };
+  const fileActions = (paths: string[]): MenuAction[] => {
+    const chosen = new Set(paths);
+    const targets = changes.filter((change) => chosen.has(change.path));
+    const conflict = targets.some((change) => change.status === 'conflict');
+    const alreadyStaged = targets.length > 0 && targets.every((change) => stageState(change) === 'staged');
+    return [
+      {
+        label: paths.length > 1 ? `添加到 Git（${paths.length} 个文件）` : '添加到 Git',
+        icon: <Plus size={14} />,
+        disabled: isBusy || !targets.length || conflict || alreadyStaged,
+        run: () => void perform('stage', { paths }, '添加到 Git'),
+      },
+      {
+        label: '提交所选文件…',
+        icon: <GitCommitHorizontal size={14} />,
+        separator: true,
+        disabled: isBusy || !targets.length || conflict || !!snapshot?.operation,
+        run: () => commitPaths(paths),
+      },
+    ];
+  };
   const totalAdded = changes
     .filter((change) => selected.has(change.path))
     .reduce((sum, change) => sum + change.additions, 0);
@@ -816,6 +958,26 @@ function App() {
     );
   }, [snapshot?.commits, branchFilter, logQuery]);
   const graph = useMemo(() => makeGraph(visibleCommits), [visibleCommits]);
+  const [logStart, logEnd] = uniformRange(visibleCommits.length, COMMIT_ROW_HEIGHT, logViewport);
+  const repositoryOptions = useMemo<SelectOption[]>(() => {
+    const list: SelectOption[] = [];
+    if (!snapshot?.repository) list.push({ value: '', label: '选择仓库' });
+    for (const repo of snapshot?.repositories ?? [])
+      list.push({ value: repo.path, label: repo.name, title: repo.path });
+    list.push({ value: '__pick', label: '打开其他仓库…', separator: true });
+    return list;
+  }, [snapshot?.repository, snapshot?.repositories]);
+  const branchFilterOptions = useMemo<SelectOption[]>(
+    () => [
+      { value: '', label: '所有分支' },
+      ...(snapshot?.branches ?? []).map((branch) => ({
+        value: branch.name,
+        label: branch.name,
+        title: branch.remote ? `远程分支 ${branch.name}` : branch.name,
+      })),
+    ],
+    [snapshot?.branches],
+  );
   const selectedFiles = [...selected];
   const openNative = () => {
     if (diffFile)
@@ -825,7 +987,31 @@ function App() {
         '打开 Diff',
       );
   };
-  const openBranchMenu = (branch: Branch, x: number, y: number) => setBranchMenu({ branch, x, y });
+  const closeBranchDropdown = () => {
+    setBranchDropdown(null);
+    setBranchMenu((current) => (current?.fromDropdown ? null : current));
+  };
+  const openBranchMenu = (branch: Branch, x: number, y: number) => {
+    setBranchDropdown(null);
+    setCommitMenu(null);
+    setBranchMenu({ branch, x, y });
+  };
+  const openBranchSubmenu = (branch: Branch, x: number, y: number) => {
+    setCommitMenu(null);
+    setBranchMenu((current) =>
+      current?.fromDropdown && current.branch.name === branch.name && current.branch.remote === branch.remote
+        ? current
+        : { branch, x, y, fromDropdown: true },
+    );
+  };
+  const dismissBranchSubmenu = () => {
+    setBranchMenu((current) => (current?.fromDropdown ? null : current));
+  };
+  const openCommitMenu = (commit: Commit, x: number, y: number) => {
+    setBranchDropdown(null);
+    setBranchMenu(null);
+    setCommitMenu({ commit, x, y });
+  };
   const branchActions = (branch: Branch): MenuAction[] => {
     const params = { branch: branch.name, remote: branch.remote };
     const locked = isBusy || !!snapshot?.operation;
@@ -859,14 +1045,14 @@ function App() {
         },
       },
       {
-        label: '合并到当前分支',
+        label: `从 ${branch.name} 分支合并到当前分支`,
         icon: <GitMerge size={14} />,
         disabled: locked || branch.current,
         separator: true,
         run: () => void perform('merge', params, '合并分支', () => setDialog(null)),
       },
       {
-        label: '将当前分支 Rebase 到此分支',
+        label: `将当前分支 Rebase 到 ${branch.name} 分支`,
         icon: <GitFork size={14} />,
         disabled: locked || branch.current || snapshot?.detached,
         run: () => void perform('rebase', params, 'Rebase', () => setDialog(null)),
@@ -924,9 +1110,35 @@ function App() {
     );
     return actions;
   };
-  const branchRow = (branch: Branch) => (
+  const commitActions = (target: Commit): MenuAction[] => {
+    const locked = isBusy || !!snapshot?.operation;
+    return [
+      {
+        label: '优选提交（Cherry-pick）',
+        icon: <GitCommitHorizontal size={14} />,
+        disabled: locked,
+        run: () => void perform('cherryPick', { hash: target.hash }, 'Cherry-pick'),
+      },
+      {
+        label: '还原提交（Revert）',
+        icon: <Undo2 size={14} />,
+        disabled: locked,
+        run: () => void perform('revert', { hash: target.hash }, '还原提交'),
+      },
+      {
+        label: '强制重置当前分支到此提交…',
+        icon: <RefreshCw size={14} />,
+        disabled: locked || snapshot?.detached,
+        separator: true,
+        danger: true,
+        run: () => void perform('reset', { hash: target.hash }, '强制重置'),
+      },
+    ];
+  };
+  const branchRow = (branch: Branch, label = branch.name, depth = 0) => (
     <div
       className={`branch-row ${branch.current ? 'current' : ''} ${branchFilter === branch.name && view === 'log' ? 'selected' : ''}`}
+      style={depth ? { paddingLeft: 8 + depth * 12 } : undefined}
       key={`${branch.remote}-${branch.name}`}
       onContextMenu={(event) => {
         event.preventDefault();
@@ -953,7 +1165,7 @@ function App() {
         }}
       >
         <GitBranch size={14} />
-        <span>{branch.name}</span>
+        <span>{label}</span>
         {branch.current && <span className="current-dot" />}
       </button>
       <button
@@ -969,6 +1181,63 @@ function App() {
       </button>
     </div>
   );
+  const toggleBranchFolder = (key: string) =>
+    setCollapsedBranchFolders((previous) => {
+      const next = new Set(previous);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  const branchFolder = (folder: BranchFolder, scope: 'local' | 'remote', depth: number) => {
+    const key = `${scope}:${folder.path}`;
+    const open = !collapsedBranchFolders.has(key);
+    return (
+      <div className="branch-folder" key={key}>
+        <button
+          className="branch-section branch-folder-heading"
+          style={{ paddingLeft: 8 + depth * 12 }}
+          aria-expanded={open}
+          title={`${open ? '折叠' : '展开'}分支分组 ${folder.path}`}
+          onClick={() => toggleBranchFolder(key)}
+        >
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <FolderClosed size={13} />
+          <span>{folder.name}</span>
+          <small>{folder.count}</small>
+        </button>
+        {open && (
+          <>
+            {folder.folders.map((child) => branchFolder(child, scope, depth + 1))}
+            {folder.branches.map((item) => branchRow(item.branch, item.label, depth + 1))}
+          </>
+        )}
+      </div>
+    );
+  };
+  const branchList = (branches: Branch[], scope: 'local' | 'remote') => {
+    if (!branchGrouped) return branches.map((branch) => branchRow(branch));
+    return groupBranches(branches, scope === 'remote' ? snapshot?.remotes || [] : []).map((entry) =>
+      entry.kind === 'branch' ? branchRow(entry.branch, entry.label) : branchFolder(entry, scope, 0),
+    );
+  };
+  // Section keys have no ':' so they cannot collide with folder keys like `local:feature`.
+  const branchSection = (scope: 'local' | 'remote', title: string, branches: Branch[]) => {
+    const open = !collapsedBranchFolders.has(scope);
+    return (
+      <>
+        <button
+          className={`branch-section branch-folder-heading${scope === 'remote' ? ' remote-heading' : ''}`}
+          aria-expanded={open}
+          title={`${open ? '折叠' : '展开'}${title}分支`}
+          onClick={() => toggleBranchFolder(scope)}
+        >
+          {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+          <span>{title}</span>
+          <small>{branches.length}</small>
+        </button>
+        {open && branchList(branches, scope)}
+      </>
+    );
+  };
 
   return (
     <div
@@ -982,32 +1251,37 @@ function App() {
       <header className="app-header">
         <div className="repo-selector">
           <FolderGit2 size={16} />
-          <select
-            aria-label="选择仓库"
+          <SelectMenu
+            ariaLabel="选择仓库"
+            placeholder="选择仓库"
             value={snapshot?.repository?.path || ''}
-            onChange={(event) => {
-              if (event.target.value === '__pick') void perform('pickRepository', {}, '选择仓库');
-              else void refresh(event.target.value);
+            options={repositoryOptions}
+            menuMinWidth={240}
+            onChange={(value) => {
+              if (value === '__pick') void perform('pickRepository', {}, '选择仓库');
+              else if (value) void refresh(value);
             }}
             disabled={isBusy || refreshing}
-          >
-            {!snapshot?.repository && <option value="">选择仓库</option>}
-            {snapshot?.repositories.map((repo) => (
-              <option value={repo.path} key={repo.path}>
-                {repo.name}
-              </option>
-            ))}
-            <option value="__pick">打开其他仓库…</option>
-          </select>
-          <ChevronDown size={12} />
+          />
         </div>
         {panelLayout && (
           <>
             <button
               className="current-branch panel-current-branch"
-              onClick={() => showDialog({ type: 'branch' })}
+              onClick={(event) => {
+                const trigger = event.currentTarget;
+                if (branchDropdown === trigger) {
+                  closeBranchDropdown();
+                  return;
+                }
+                setBranchMenu(null);
+                setCommitMenu(null);
+                setBranchDropdown(trigger);
+              }}
               disabled={!snapshot?.repository}
               title="切换、合并或新建分支"
+              aria-haspopup="dialog"
+              aria-expanded={!!branchDropdown}
               onContextMenu={(event) => {
                 event.preventDefault();
                 const branch = snapshot?.branches.find((branch) => branch.current);
@@ -1107,6 +1381,14 @@ function App() {
           <div className="branch-heading">
             <span>分支</span>
             <IconButton
+              title={branchGrouped ? '切换为平铺分支列表' : '按前缀分组分支'}
+              className={branchGrouped ? 'active' : ''}
+              disabled={!snapshot?.repository}
+              onClick={() => setBranchGrouped((value) => !value)}
+            >
+              <ListTree size={15} />
+            </IconButton>
+            <IconButton
               title="新建分支"
               disabled={isBusy || !snapshot?.repository || !snapshot.commits.length}
               onClick={() => showDialog({ type: 'newBranch' })}
@@ -1120,23 +1402,16 @@ function App() {
               aria-label="搜索分支"
               placeholder="搜索分支…"
               value={branchQuery}
-              onChange={(event) => setBranchQuery(event.target.value)}
+              onChange={(event) => {
+                setBranchQuery(event.target.value);
+                setCollapsedBranchFolders(new Set());
+              }}
             />
             <kbd>⌕</kbd>
           </label>
           <div className="branches-scroll">
-            <div className="branch-section">
-              <ChevronDown size={12} />
-              <span>本地</span>
-              <small>{localBranches.length}</small>
-            </div>
-            {localBranches.map(branchRow)}
-            <div className="branch-section remote-heading">
-              <ChevronDown size={12} />
-              <span>远程</span>
-              <small>{remoteBranches.length}</small>
-            </div>
-            {remoteBranches.map(branchRow)}
+            {branchSection('local', '本地', localBranches)}
+            {branchSection('remote', '远程', remoteBranches)}
             {!localBranches.length && !remoteBranches.length && (
               <p className="sidebar-empty">{branchQuery ? '没有匹配的分支' : '首次提交后会显示分支'}</p>
             )}
@@ -1230,14 +1505,14 @@ function App() {
                     <Plus size={15} />
                   </IconButton>
                   <IconButton
-                    title="移动选中文件到更改列表"
+                    title="移动勾选文件到更改列表"
                     disabled={!selected.size || isBusy}
                     onClick={() => showDialog({ type: 'move' })}
                   >
                     <FolderClosed size={14} />
                   </IconButton>
                   <IconButton
-                    title="回滚选中的更改"
+                    title="回滚勾选的更改"
                     disabled={!selected.size || isBusy}
                     onClick={() => void perform('discard', { paths: selectedFiles }, '回滚更改')}
                   >
@@ -1258,7 +1533,7 @@ function App() {
                     </button>
                   )}
                 </label>
-                <div className="file-list">
+                <div className="file-list" ref={fileViewport.ref}>
                   {!changes.length ? (
                     <Empty
                       icon={<CircleCheck size={32} />}
@@ -1268,112 +1543,169 @@ function App() {
                   ) : !filteredChanges.length ? (
                     <Empty icon={<Search size={26} />} title="没有匹配的文件" />
                   ) : (
-                    groups.map((group) => (
-                      <div className="change-group" key={group.id}>
-                        <div className="group-heading">
-                          <button
-                            className="collapse-button"
-                            aria-label={`${collapsed.has(group.id) ? '展开' : '折叠'} ${group.name}`}
-                            onClick={() =>
-                              setCollapsed((previous) => {
-                                const next = new Set(previous);
-                                next.has(group.id) ? next.delete(group.id) : next.add(group.id);
-                                return next;
-                              })
-                            }
-                          >
-                            {collapsed.has(group.id) ? <ChevronRight size={13} /> : <ChevronDown size={13} />}
-                          </button>
-                          <input
-                            type="checkbox"
-                            aria-label={`选择 ${group.name}`}
-                            ref={(element) => {
-                              if (element)
-                                element.indeterminate =
-                                  group.files.some((file) => selected.has(file.path)) &&
-                                  !group.files.every((file) => selected.has(file.path));
-                            }}
-                            checked={
-                              !!group.files.length && group.files.every((file) => selected.has(file.path))
-                            }
-                            onChange={() =>
-                              toggleGroup(group.files.filter((file) => file.status !== 'conflict'))
-                            }
-                            disabled={isBusy || group.id === 'conflicts'}
-                          />
-                          <span className={group.id === 'conflicts' ? 'red' : ''}>{group.name}</span>
-                          <small>{group.files.length}</small>
-                          {group.id === 'default' && <span className="default-tag">默认</span>}
-                          {!['default', 'conflicts', 'untracked'].includes(group.id) && (
-                            <IconButton
-                              title={`删除更改列表 ${group.name}`}
-                              disabled={isBusy}
-                              onClick={() =>
-                                void perform('changelist', { action: 'delete', id: group.id }, '删除更改列表')
-                              }
-                            >
-                              <X size={12} />
-                            </IconButton>
-                          )}
-                        </div>
-                        {!collapsed.has(group.id) &&
-                          group.files.map((change) => (
-                            <div
-                              className={`file-row ${activeFile === change.path ? 'selected' : ''}`}
-                              key={change.path}
-                            >
+                    <div
+                      style={{
+                        paddingTop: fileItems.offsets[fileStart],
+                        paddingBottom: fileItems.offsets.at(-1)! - fileItems.offsets[fileEnd],
+                      }}
+                    >
+                      {fileItems.items.slice(fileStart, fileEnd).map((item) => {
+                        if (item.kind === 'group') {
+                          const group = item.group;
+                          return (
+                            <div className="group-heading" key={`group:${group.id}`}>
+                              <button
+                                className="collapse-button"
+                                aria-label={`${collapsed.has(group.id) ? '展开' : '折叠'} ${group.name}`}
+                                onClick={() =>
+                                  setCollapsed((previous) => {
+                                    const next = new Set(previous);
+                                    next.has(group.id) ? next.delete(group.id) : next.add(group.id);
+                                    return next;
+                                  })
+                                }
+                              >
+                                {collapsed.has(group.id) ? (
+                                  <ChevronRight size={13} />
+                                ) : (
+                                  <ChevronDown size={13} />
+                                )}
+                              </button>
                               <input
                                 type="checkbox"
-                                aria-label={`选择文件 ${change.path}`}
-                                checked={selected.has(change.path)}
-                                disabled={isBusy || change.status === 'conflict'}
-                                onChange={() => toggle(change.path)}
+                                aria-label={`选择 ${group.name}`}
+                                ref={(element) => {
+                                  if (element)
+                                    element.indeterminate =
+                                      group.files.some((file) => selected.has(file.path)) &&
+                                      !group.files.every((file) => selected.has(file.path));
+                                }}
+                                checked={
+                                  !!group.files.length && group.files.every((file) => selected.has(file.path))
+                                }
+                                onChange={() =>
+                                  toggleGroup(group.files.filter((file) => file.status !== 'conflict'))
+                                }
+                                disabled={isBusy || group.id === 'conflicts'}
                               />
-                              <button
-                                className="file-select"
-                                title={`${change.path}\n${statusLabels[change.status]}`}
-                                onClick={() => setActiveFile(change.path)}
-                                onKeyDown={(event) => {
-                                  if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-                                    event.preventDefault();
-                                    const buttons = [
-                                      ...event.currentTarget
-                                        .closest('.file-list')!
-                                        .querySelectorAll<HTMLButtonElement>('.file-select'),
-                                    ];
-                                    const index =
-                                      buttons.indexOf(event.currentTarget) +
-                                      (event.key === 'ArrowDown' ? 1 : -1);
-                                    const next = buttons[Math.max(0, Math.min(buttons.length - 1, index))];
-                                    next.focus();
-                                    next.click();
-                                  } else if (event.key === ' ' && !isBusy && change.status !== 'conflict') {
+                              <span className={group.id === 'conflicts' ? 'red' : ''}>{group.name}</span>
+                              <small>{group.files.length}</small>
+                              {group.id === 'default' && <span className="default-tag">默认</span>}
+                              {!['default', 'conflicts', 'untracked'].includes(group.id) && (
+                                <IconButton
+                                  title={`删除更改列表 ${group.name}`}
+                                  disabled={isBusy}
+                                  onClick={() =>
+                                    void perform(
+                                      'changelist',
+                                      { action: 'delete', id: group.id },
+                                      '删除更改列表',
+                                    )
+                                  }
+                                >
+                                  <X size={12} />
+                                </IconButton>
+                              )}
+                            </div>
+                          );
+                        }
+                        const change = item.change;
+                        const stage = stageState(change);
+                        return (
+                          <div
+                            className={`file-row ${activeFile === change.path ? 'selected' : ''} ${fileSelection.has(change.path) ? 'marked' : ''}`}
+                            key={`file:${change.path}`}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              openFileMenu(change, event.clientX, event.clientY);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key === 'ContextMenu' || (event.shiftKey && event.key === 'F10')) {
+                                event.preventDefault();
+                                const rect = event.currentTarget.getBoundingClientRect();
+                                openFileMenu(change, rect.left + 15, rect.bottom);
+                              }
+                            }}
+                          >
+                            <input
+                              type="checkbox"
+                              aria-label={`选择文件 ${change.path}`}
+                              checked={selected.has(change.path)}
+                              disabled={isBusy || change.status === 'conflict'}
+                              onChange={() => toggle(change.path)}
+                            />
+                            <button
+                              className="file-select"
+                              data-path={change.path}
+                              title={`${change.path}\n${statusLabels[change.status]}${stage ? `\n${stage === 'staged' ? '修改已全部暂存' : '已暂存部分修改，工作区还有未暂存修改'}` : ''}\nShift / ${navigator.platform.includes('Mac') ? '⌘' : 'Ctrl'} 点击可多选`}
+                              onClick={(event) => selectFileRow(change.path, event)}
+                              onKeyDown={(event) => {
+                                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+                                  if (event.key === ' ' && !isBusy && change.status !== 'conflict') {
                                     event.preventDefault();
                                     toggle(change.path);
                                   }
-                                }}
-                                onDoubleClick={() =>
-                                  void perform('openDiff', { path: change.path }, '打开 Diff')
+                                  return;
                                 }
+                                event.preventDefault();
+                                const buttons = [
+                                  ...event.currentTarget
+                                    .closest('.file-list')!
+                                    .querySelectorAll<HTMLButtonElement>('.file-select'),
+                                ];
+                                const index =
+                                  buttons.indexOf(event.currentTarget) + (event.key === 'ArrowDown' ? 1 : -1);
+                                const next = buttons[Math.max(0, Math.min(buttons.length - 1, index))];
+                                if (!next) return;
+                                next.focus();
+                                const path = next.dataset.path || '';
+                                if (event.shiftKey)
+                                  selectFileRow(path, {
+                                    shiftKey: true,
+                                    metaKey: false,
+                                    ctrlKey: false,
+                                  });
+                                else if (event.metaKey || event.ctrlKey) setActiveFile(path);
+                                else selectFileRow(path);
+                              }}
+                              onDoubleClick={() =>
+                                void perform('openDiff', { path: change.path }, '打开 Diff')
+                              }
+                            >
+                              <FileIcon file={change.path} />
+                              <span className="file-label">
+                                <strong>{basename(change.path)}</strong>
+                                <small>{dirname(change.path) || '项目根目录'}</small>
+                              </span>
+                              {stage && (
+                                <span
+                                  className={`stage-badge ${stage}`}
+                                  title={
+                                    stage === 'staged'
+                                      ? '该文件的修改已全部暂存'
+                                      : '已暂存部分修改，工作区还有未暂存修改'
+                                  }
+                                >
+                                  {stage === 'staged' ? '已暂存' : '部分暂存'}
+                                </span>
+                              )}
+                              <span
+                                className={`file-status ${change.status}`}
+                                title={`状态：${statusLabels[change.status]}`}
                               >
-                                <FileIcon file={change.path} />
-                                <span className="file-label">
-                                  <strong>{basename(change.path)}</strong>
-                                  <small>{dirname(change.path) || '项目根目录'}</small>
-                                </span>
-                                <span className={`file-status ${change.status}`}>
-                                  {statusLetters[change.status]}
-                                </span>
-                              </button>
-                            </div>
-                          ))}
-                      </div>
-                    ))
+                                {statusLetters[change.status]}
+                              </span>
+                            </button>
+                          </div>
+                        );
+                      })}
+                    </div>
                   )}
                 </div>
                 <div className="selection-summary">
                   <span>
-                    已选择 <b>{selected.size}</b> / {changes.length} 个文件
+                    已勾选 <b>{selected.size}</b> / {changes.length} 个文件
+                    {fileSelection.size > 1 && <em> · 已选 {fileSelection.size}</em>}
                   </span>
                   <span className="diff-stat">
                     <b>+{totalAdded}</b>
@@ -1520,19 +1852,14 @@ function App() {
                         onChange={(event) => setLogQuery(event.target.value)}
                       />
                     </label>
-                    <select
-                      aria-label="筛选分支历史"
+                    <SelectMenu
+                      ariaLabel="筛选分支历史"
                       className="filter-select"
                       value={branchFilter}
-                      onChange={(event) => setBranchFilter(event.target.value)}
-                    >
-                      <option value="">所有分支</option>
-                      {snapshot.branches.map((branch) => (
-                        <option value={branch.name} key={branch.name}>
-                          {branch.name}
-                        </option>
-                      ))}
-                    </select>
+                      options={branchFilterOptions}
+                      menuMinWidth={220}
+                      onChange={setBranchFilter}
+                    />
                     <span className="history-count">{visibleCommits.length} 次提交</span>
                   </div>
                   <div className="log-table-header">
@@ -1542,7 +1869,7 @@ function App() {
                     <span className="log-hash">Hash</span>
                     <span className="log-date">时间</span>
                   </div>
-                  <div className="log-scroll">
+                  <div className="log-scroll" ref={logViewport.ref}>
                     {!visibleCommits.length ? (
                       <Empty
                         icon={<History size={32} />}
@@ -1557,28 +1884,51 @@ function App() {
                           height={visibleCommits.length * COMMIT_ROW_HEIGHT}
                           aria-hidden="true"
                         >
-                          {graph.edges.map((edge) => (
+                          {graph.edges.slice(graph.rowEdges[logStart], graph.rowEdges[logEnd]).map((edge) => (
                             <path
                               key={edge.key}
                               d={edge.d}
                               fill="none"
                               stroke={edge.color}
-                              strokeWidth="1.8"
+                              strokeLinecap="round"
+                              strokeWidth="1.5"
                             />
                           ))}
-                          {graph.nodes.map((node, i) => (
-                            <circle
-                              key={node.commit.hash}
-                              cx={node.lane * 18 + 20}
-                              cy={i * COMMIT_ROW_HEIGHT + COMMIT_ROW_HEIGHT / 2}
-                              r={node.commit.parents.length > 1 ? 5 : 4}
-                              fill="var(--surface)"
-                              stroke={graphColors[node.lane % graphColors.length]}
-                              strokeWidth={2}
-                            />
-                          ))}
+                          {graph.nodes.slice(logStart, logEnd).map((node, offset) => {
+                            const cy = (logStart + offset) * COMMIT_ROW_HEIGHT + COMMIT_ROW_HEIGHT / 2;
+                            if (node.kind === 'head')
+                              return (
+                                <circle
+                                  key={node.commit.hash}
+                                  cx={node.x}
+                                  cy={cy}
+                                  r={6}
+                                  fill="var(--surface)"
+                                  stroke={node.color}
+                                  strokeWidth={2}
+                                />
+                              );
+                            if (node.kind === 'merge')
+                              return (
+                                <g key={node.commit.hash}>
+                                  <circle
+                                    cx={node.x}
+                                    cy={cy}
+                                    r={6}
+                                    fill="var(--surface)"
+                                    stroke={node.color}
+                                    strokeWidth={2}
+                                  />
+                                  <circle cx={node.x} cy={cy} r={2} fill={node.color} />
+                                </g>
+                              );
+                            return (
+                              <circle key={node.commit.hash} cx={node.x} cy={cy} r={4.5} fill={node.color} />
+                            );
+                          })}
                         </svg>
-                        {visibleCommits.map((commit) => (
+                        <div style={{ height: logStart * COMMIT_ROW_HEIGHT }} />
+                        {visibleCommits.slice(logStart, logEnd).map((commit) => (
                           <button
                             key={commit.hash}
                             className={`log-row ${activeCommit === commit.hash ? 'selected' : ''}`}
@@ -1586,7 +1936,22 @@ function App() {
                               setActiveCommit(commit.hash);
                               setHistoryFile('');
                             }}
-                            title={commit.subject}
+                            onContextMenu={(event) => {
+                              event.preventDefault();
+                              setActiveCommit(commit.hash);
+                              setHistoryFile('');
+                              openCommitMenu(commit, event.clientX, event.clientY);
+                            }}
+                            onKeyDown={(event) => {
+                              if (event.key !== 'ContextMenu' && !(event.shiftKey && event.key === 'F10'))
+                                return;
+                              event.preventDefault();
+                              setActiveCommit(commit.hash);
+                              setHistoryFile('');
+                              const rect = event.currentTarget.getBoundingClientRect();
+                              openCommitMenu(commit, rect.left + 24, rect.bottom);
+                            }}
+                            title={`${commit.subject}\n右键或 Shift+F10 打开提交操作`}
                           >
                             <span style={{ width: graph.width }} />
                             <span className="log-subject">
@@ -1617,6 +1982,7 @@ function App() {
                             <span className="log-date">{shortDate(commit.date)}</span>
                           </button>
                         ))}
+                        <div style={{ height: (visibleCommits.length - logEnd) * COMMIT_ROW_HEIGHT }} />
                       </div>
                     )}
                   </div>
@@ -1895,6 +2261,44 @@ function App() {
           title={branchMenu.branch.name}
           actions={branchActions(branchMenu.branch)}
           close={closeBranchMenu}
+          onSelect={branchMenu.fromDropdown ? closeBranchDropdown : undefined}
+          onCancel={branchMenu.fromDropdown ? closeBranchDropdown : undefined}
+        />
+      )}
+      {commitMenu && (
+        <ContextMenu
+          x={commitMenu.x}
+          y={commitMenu.y}
+          title={`${commitMenu.commit.hash.slice(0, 8)} · ${commitMenu.commit.subject}`}
+          label={`提交 ${commitMenu.commit.hash.slice(0, 8)} 操作`}
+          actions={commitActions(commitMenu.commit)}
+          close={closeCommitMenu}
+        />
+      )}
+      {fileMenu && (
+        <ContextMenu
+          x={fileMenu.x}
+          y={fileMenu.y}
+          title={fileMenu.paths.length > 1 ? `已选择 ${fileMenu.paths.length} 个文件` : fileMenu.paths[0]}
+          label={`文件操作：${fileMenu.paths.join('、')}`}
+          actions={fileActions(fileMenu.paths)}
+          close={closeFileMenu}
+        />
+      )}
+      {branchDropdown && snapshot?.repository && (
+        <BranchDropdown
+          anchor={branchDropdown}
+          branches={snapshot.branches}
+          activeBranch={branchMenu?.fromDropdown ? branchMenu.branch : null}
+          onBranch={openBranchSubmenu}
+          onBranchHover={openBranchSubmenu}
+          onDismissSubmenu={dismissBranchSubmenu}
+          onNewBranch={() => {
+            closeBranchDropdown();
+            showDialog({ type: 'newBranch' });
+          }}
+          newBranchDisabled={isBusy || !!snapshot.operation}
+          close={closeBranchDropdown}
         />
       )}
       {dialog && (
@@ -1904,11 +2308,11 @@ function App() {
             if (event.target === event.currentTarget && !isBusy) setDialog(null);
           }}
         >
-          <section
-            className={`modal ${dialog.type === 'branch' ? 'branch-modal' : ''}`}
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="dialog-title"
+          <DialogWindow
+            key={dialog.type}
+            savedFrame={dialogFrames[dialog.type]}
+            onFrameChange={(frame) => rememberDialogFrame(dialog.type, frame)}
+            titleId="dialog-title"
           >
             <div className="modal-header">
               <span className="modal-icon">
@@ -1924,10 +2328,12 @@ function App() {
                   <GitBranch size={19} />
                 )}
               </span>
-              <h2 id="dialog-title">
+              <h2
+                id="dialog-title"
+                title="拖动标题栏移动窗口，拖动边缘调整大小，双击标题栏恢复默认位置和大小"
+              >
                 {
                   {
-                    branch: '分支操作',
                     newBranch: '新建分支',
                     renameBranch: '重命名分支',
                     upstream: '设置上游分支',
@@ -1944,73 +2350,7 @@ function App() {
                 <X size={18} />
               </IconButton>
             </div>
-            {dialog.type === 'branch' ? (
-              <>
-                <label className="search-box branch-picker-search">
-                  <Search size={14} />
-                  <input
-                    aria-label="查找分支"
-                    placeholder="查找分支…"
-                    value={dialogValue}
-                    onChange={(event) => setDialogValue(event.target.value)}
-                  />
-                </label>
-                <div className="branch-picker">
-                  {(['本地分支', '远程分支'] as const).map((group, index) => (
-                    <React.Fragment key={group}>
-                      <div className="branch-picker-heading">{group}</div>
-                      {snapshot?.branches
-                        .filter(
-                          (branch) =>
-                            branch.remote === !!index &&
-                            branch.name.toLowerCase().includes(dialogValue.toLowerCase()),
-                        )
-                        .map((branch) => (
-                          <div
-                            className="branch-picker-row"
-                            key={`${branch.remote}-${branch.name}`}
-                            onContextMenu={(event) => {
-                              event.preventDefault();
-                              openBranchMenu(branch, event.clientX, event.clientY);
-                            }}
-                          >
-                            <button
-                              className="branch-picker-name"
-                              title={branch.subject}
-                              onClick={(event) => {
-                                const rect = event.currentTarget.getBoundingClientRect();
-                                openBranchMenu(branch, rect.left + 30, rect.bottom);
-                              }}
-                            >
-                              <GitBranch size={14} />
-                              <span className="branch-picker-text">
-                                <strong>{branch.name}</strong>
-                                <small>{branch.upstream || branch.subject}</small>
-                              </span>
-                              {branch.current && <span className="tag">当前</span>}
-                              <ChevronRight size={13} />
-                            </button>
-                          </div>
-                        ))}
-                    </React.Fragment>
-                  ))}
-                  {!snapshot?.branches.some((branch) =>
-                    branch.name.toLowerCase().includes(dialogValue.toLowerCase()),
-                  ) && <p className="sidebar-empty">没有匹配的分支</p>}
-                </div>
-                <div className="modal-footer">
-                  <button
-                    className="button"
-                    disabled={isBusy}
-                    onClick={() => showDialog({ type: 'newBranch' })}
-                  >
-                    <Plus size={14} />
-                    新建分支
-                  </button>
-                  <span className="muted">选择分支查看操作 · 右键可直接打开菜单</span>
-                </div>
-              </>
-            ) : dialog.type === 'compare' ? (
+            {dialog.type === 'compare' ? (
               <>
                 <p className="modal-description comparison-route">
                   <code>{dialog.branch?.name}</code>
@@ -2067,23 +2407,21 @@ function App() {
                 <p className="modal-description">
                   设置 <code>{dialog.branch?.name}</code> 的拉取和推送目标。
                 </p>
-                <label className="form-label">
-                  上游分支
-                  <select
-                    aria-label="上游分支"
+                <div className="form-label">
+                  <span>上游分支</span>
+                  <SelectMenu
+                    ariaLabel="上游分支"
                     value={dialogValue}
-                    onChange={(event) => setDialogValue(event.target.value)}
-                  >
-                    <option value="">不跟踪上游</option>
-                    {snapshot?.branches
-                      .filter((branch) => branch.remote)
-                      .map((branch) => (
-                        <option key={branch.name} value={branch.name}>
-                          {branch.name}
-                        </option>
-                      ))}
-                  </select>
-                </label>
+                    menuMinWidth={240}
+                    onChange={setDialogValue}
+                    options={[
+                      { value: '', label: '不跟踪上游' },
+                      ...(snapshot?.branches ?? [])
+                        .filter((branch) => branch.remote)
+                        .map((branch) => ({ value: branch.name, label: branch.name })),
+                    ]}
+                  />
+                </div>
                 <div className="modal-footer">
                   <button className="button" type="button" onClick={() => setDialog(null)}>
                     取消
@@ -2102,6 +2440,7 @@ function App() {
                 <p>
                   围绕 IDEA 的日常工作流，把 Git
                   操作放在一个工作台里。拖动分栏边界调整宽度，双击边界恢复默认；也可聚焦边界后使用左右方向键。
+                  对话框可拖动标题栏移动、拖动边缘调整大小，双击标题栏恢复默认。
                 </p>
                 <ol>
                   <li>
@@ -2326,7 +2665,7 @@ function App() {
                 </div>
               </form>
             )}
-          </section>
+          </DialogWindow>
         </div>
       )}
     </div>

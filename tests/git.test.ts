@@ -257,6 +257,26 @@ test('rollback restores tracked paths, removes chosen untracked files and preser
   );
 });
 
+test('staging selected files updates the index and leaves other changes untouched', async (t) => {
+  const { git, write, initial } = await repository(t);
+  await initial();
+  await write('base.txt', 'changed\n');
+  await write('new file.txt', 'new\n');
+  await write('other.txt', 'other\n');
+  await git.stage(['base.txt', 'new file.txt']);
+  assert.equal(
+    (await git.run(['diff', '--cached', '--name-status'])).trim().split('\n').sort().join('\n'),
+    'A\tnew file.txt\nM\tbase.txt',
+  );
+  const changes = (await git.snapshot()).changes;
+  const base = changes.find((change) => change.path === 'base.txt')!;
+  assert.deepEqual([base.index, base.worktree], ['M', ' ']);
+  const added = changes.find((change) => change.path === 'new file.txt')!;
+  assert.deepEqual([added.status, added.index, added.worktree], ['added', 'A', ' ']);
+  const other = changes.find((change) => change.path === 'other.txt')!;
+  assert.deepEqual([other.status, other.index, other.worktree], ['untracked', '?', '?']);
+});
+
 test('path validation and symlink boundaries prevent out-of-repository access', async (t) => {
   const { root, git, initial } = await repository(t);
   await initial();
@@ -332,6 +352,27 @@ test('revert and cherry-pick create correct changes and preserve history', async
   await git.revert(picked.hash);
   assert.equal((await git.snapshot()).changes.length, 0);
   assert.match((await git.snapshot()).commits[0].subject, /Revert/);
+});
+
+test('hard reset moves the branch, discards tracked changes and keeps untracked files', async (t) => {
+  const { root, git, write, initial } = await repository(t);
+  await initial();
+  const base = (await git.snapshot()).commits[0].hash;
+  await write('second.txt', 'second\n');
+  await git.commit(['second.txt'], 'second');
+  await write('base.txt', 'dirty tracked\n');
+  await git.run(['add', '--', 'base.txt']);
+  await write('untracked.txt', 'keep me\n');
+  await git.reset(base);
+  const state = await git.snapshot();
+  assert.equal(state.commits[0].hash, base);
+  assert.deepEqual(
+    state.changes.map((change) => change.path),
+    ['untracked.txt'],
+  );
+  assert.equal(await readFile(path.join(root, 'base.txt'), 'utf8'), 'base\n');
+  assert.equal(await readFile(path.join(root, 'untracked.txt'), 'utf8'), 'keep me\n');
+  await assert.rejects(git.reset('not-a-commit'));
 });
 
 test('branch creation from selected ref, rename, comparison and clean rebase', async (t) => {

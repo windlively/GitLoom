@@ -56,11 +56,11 @@ const changes: Change[] = [
   ['package.json', 'modified', 2, 1],
   ['src/components/command-shortcut.tsx', 'untracked', 28, 0],
   ['src/lib/commands.ts', 'untracked', 35, 0],
-].map(([file, status, additions, deletions]) => ({
+].map(([file, status, additions, deletions], index) => ({
   path: file as string,
   status: status as Change['status'],
-  index: status === 'untracked' ? '?' : ' ',
-  worktree: status === 'untracked' ? '?' : 'M',
+  index: status === 'untracked' ? '?' : index === 3 || index === 4 ? 'M' : ' ',
+  worktree: status === 'untracked' ? '?' : index === 4 ? ' ' : 'M',
   additions: additions as number,
   deletions: deletions as number,
 }));
@@ -115,8 +115,10 @@ const state: Snapshot = {
     },
     { name: 'main', current: false, remote: false, upstream: 'origin/main', subject: subjects[3] },
     { name: 'feature/project-search', current: false, remote: false, upstream: '', subject: subjects[6] },
+    { name: 'feature/ui/login', current: false, remote: false, upstream: '', subject: subjects[6] },
     { name: 'origin/main', current: false, remote: true, upstream: '', subject: subjects[3] },
     { name: 'origin/feature/command-menu', current: false, remote: true, upstream: '', subject: subjects[2] },
+    { name: 'origin/feature/ui/login', current: false, remote: true, upstream: '', subject: subjects[6] },
   ],
   stashes: [
     {
@@ -133,6 +135,31 @@ const state: Snapshot = {
   operation: null,
   updatedAt: Date.now(),
 };
+// ?scale=N populates synthetic files and commits for large-repository performance checks.
+const scale = Math.min(20000, Number(new URLSearchParams(location.search).get('scale')) || 0);
+if (scale) {
+  for (let i = 0; i < scale; i++)
+    changes.push({
+      path: `src/module-${i % 40}/feature-${Math.floor(i / 40)}/file-${i}.ts`,
+      status: i % 9 === 0 ? 'untracked' : 'modified',
+      index: i % 9 === 0 ? '?' : ' ',
+      worktree: i % 9 === 0 ? '?' : 'M',
+      additions: i % 30,
+      deletions: i % 7,
+    });
+  const last = commits.at(-1)!;
+  last.parents = [hash(1000)];
+  for (let i = 0; i < scale; i++)
+    commits.push({
+      hash: hash(1000 + i),
+      parents: i === scale - 1 ? [] : i % 25 === 0 ? [hash(1001 + i), hash(1003 + i)] : [hash(1001 + i)],
+      author: ['Lin', 'Alex Chen', 'Mia'][i % 3],
+      email: 'dev@example.com',
+      date: new Date(Date.now() - (i + 20) * 3700_000).toISOString(),
+      subject: `chore: 合成提交 ${i}，用于验证大量历史记录的渲染性能`,
+      refs: i % 500 === 0 ? [`release/${i}`] : [],
+    });
+}
 
 export async function previewRequest<M extends Method>(
   method: M,
@@ -165,6 +192,19 @@ export async function previewRequest<M extends Method>(
       total: state.ahead,
       commits: state.commits.slice(0, state.ahead),
     };
+  if (method === 'stage') {
+    state.changes = state.changes.map((change) =>
+      p.paths.includes(change.path)
+        ? {
+            ...change,
+            status: change.status === 'untracked' ? 'added' : change.status,
+            index: change.status === 'untracked' ? 'A' : change.status === 'deleted' ? 'D' : 'M',
+            worktree: ' ',
+          }
+        : change,
+    );
+    return '预览：已暂存所选文件';
+  }
   if (method === 'commit') {
     const commit: Commit = {
       hash: hash(Date.now()),
@@ -244,6 +284,16 @@ export async function previewRequest<M extends Method>(
   if (method === 'discard') {
     state.changes = state.changes.filter((change) => !p.paths.includes(change.path));
     return '预览：更改已回滚';
+  }
+  if (method === 'reset') {
+    const index = state.commits.findIndex((commit) => commit.hash === p.hash);
+    if (index < 0) throw new Error('提交不存在，请刷新后重试。');
+    state.commits = state.commits.slice(0, index + 1);
+    state.commits[0].refs = [`HEAD -> ${state.branch}`];
+    state.changes = state.changes.filter((change) => change.status === 'untracked');
+    state.ahead = 0;
+    state.behind = 0;
+    return '预览：已强制重置';
   }
   if (method === 'changelist') {
     if (p.action === 'create') state.changelists.push({ id: `list-${Date.now()}`, name: p.name, paths: [] });

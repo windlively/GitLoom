@@ -137,10 +137,7 @@ export class GitService {
       stashes,
       remotes,
       numstat,
-      merging,
-      rebasing,
-      cherryPicking,
-      reverting,
+      [merging, rebaseMerge, rebaseApply, cherryPicking, reverting],
     ] = await Promise.all([
       this.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { silent: true }),
       this.optional(['symbolic-ref', '--short', 'HEAD']),
@@ -179,11 +176,9 @@ export class GitService {
             silent: true,
           })
         : this.optional(['diff', '--cached', '--numstat', '-z']),
-      this.existsGitPath('MERGE_HEAD'),
-      this.isRebasing(),
-      this.existsGitPath('CHERRY_PICK_HEAD'),
-      this.existsGitPath('REVERT_HEAD'),
+      this.gitPathsExist(['MERGE_HEAD', 'rebase-merge', 'rebase-apply', 'CHERRY_PICK_HEAD', 'REVERT_HEAD']),
     ]);
+    const rebasing = rebaseMerge || rebaseApply;
     const changes = parseStatus(status),
       stats = parseNumstat(numstat);
     for (const change of changes) Object.assign(change, stats.get(change.path));
@@ -240,6 +235,23 @@ export class GitService {
     } catch {
       return false;
     }
+  }
+  private async gitPathsExist(names: string[]): Promise<boolean[]> {
+    const files = (
+      await this.run(['rev-parse', ...names.flatMap((name) => ['--git-path', name])], { silent: true })
+    )
+      .split('\n')
+      .slice(0, names.length);
+    return Promise.all(
+      names.map(async (_, index) => {
+        try {
+          await lstat(path.resolve(this.root, files[index]));
+          return true;
+        } catch {
+          return false;
+        }
+      }),
+    );
   }
   private async isRebasing(): Promise<boolean> {
     return (await this.existsGitPath('rebase-merge')) || (await this.existsGitPath('rebase-apply'));
@@ -425,6 +437,30 @@ export class GitService {
     return { commit: parseLog(log)[0], message: message.trim(), files };
   }
 
+  stage(paths: string[]): Promise<string> {
+    return this.serialize(async () => {
+      const changes = parseStatus(
+        await this.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { silent: true }),
+      );
+      const requested = new Set(paths);
+      const selected = changes.filter((change) => requested.has(change.path));
+      if (!selected.length || selected.length !== requested.size)
+        throw new Error('文件列表已变化，请刷新后重试。');
+      if (selected.some((change) => change.status === 'conflict'))
+        throw new Error('冲突文件请先在合并编辑器中解决并标记。');
+      const pathspecs = [
+        ...new Set(
+          selected.flatMap((change) =>
+            change.originalPath ? [change.path, change.originalPath] : [change.path],
+          ),
+        ),
+      ];
+      for (const file of pathspecs) await this.safePath(file);
+      await this.run(['add', '-A', '--', ...pathspecs]);
+      return `已暂存 ${selected.length} 个文件。`;
+    });
+  }
+
   async commit(paths: string[], message: string): Promise<string> {
     if (!message.trim()) throw new Error('请输入提交说明。');
     if (message.length > 100000) throw new Error('提交说明过长。');
@@ -439,10 +475,12 @@ export class GitService {
       const changes = parseStatus(
         await this.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { silent: true }),
       );
-      if (!paths.length || paths.some((file) => !changes.some((change) => change.path === file)))
+      const known = new Set(changes.map((change) => change.path)),
+        requested = new Set(paths);
+      if (!paths.length || paths.some((file) => !known.has(file)))
         throw new Error('文件列表已变化，请刷新后重新选择。');
       if (changes.some((change) => change.status === 'conflict')) throw new Error('请先解决所有冲突。');
-      const selected = changes.filter((change) => paths.includes(change.path));
+      const selected = changes.filter((change) => requested.has(change.path));
       const pathspecs = [
         ...new Set(
           selected.flatMap((change) =>
@@ -745,8 +783,9 @@ export class GitService {
       const changes = parseStatus(
         await this.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { silent: true }),
       );
-      const selected = changes.filter((change) => paths.includes(change.path));
-      if (!selected.length || selected.length !== new Set(paths).size)
+      const requested = new Set(paths);
+      const selected = changes.filter((change) => requested.has(change.path));
+      if (!selected.length || selected.length !== requested.size)
         throw new Error('文件列表已变化，请刷新后重试。');
       if (selected.some((change) => change.status === 'conflict'))
         throw new Error('冲突文件不能回滚，请打开合并编辑器。');
@@ -774,6 +813,19 @@ export class GitService {
   }
   revert(hash: string): Promise<string> {
     return this.serialize(() => this.run(['revert', '--no-edit', this.hash(hash)]));
+  }
+  reset(hash: string): Promise<string> {
+    return this.serialize(async () => {
+      const target = this.hash(hash);
+      if (
+        (await this.existsGitPath('MERGE_HEAD')) ||
+        (await this.isRebasing()) ||
+        (await this.existsGitPath('CHERRY_PICK_HEAD')) ||
+        (await this.existsGitPath('REVERT_HEAD'))
+      )
+        throw new Error('请先在冲突提示条中完成或中止当前 Git 操作。');
+      return this.run(['reset', '--hard', target]);
+    });
   }
   continueOperation(): Promise<string> {
     return this.serialize(async () => {
