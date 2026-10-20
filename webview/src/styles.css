@@ -605,6 +605,12 @@ body.vscode-high-contrast-light .select-popup {
   min-height: 0;
   overflow-x: auto;
 }
+.changes-workspace.native-diff {
+  grid-template-columns: minmax(150px, 1fr) var(--commit-width);
+}
+.changes-workspace.native-diff > .commit-panel {
+  grid-column: 2;
+}
 .changes-panel {
   display: contents;
 }
@@ -698,6 +704,39 @@ body.vscode-high-contrast-light .select-popup {
 .file-row:focus-within {
   outline: 1px solid var(--vscode-list-focusOutline, var(--accent));
   outline-offset: -1px;
+}
+.file-folder {
+  display: flex;
+  align-items: center;
+  height: 22px;
+  min-height: 22px;
+}
+.file-folder-toggle {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  flex: 1;
+  min-width: 0;
+  height: 22px;
+  padding-right: 8px;
+  text-align: left;
+}
+.file-folder-toggle:hover {
+  background: var(--surface-hover);
+}
+.file-folder-toggle > .codicon {
+  flex-shrink: 0;
+}
+.file-folder-toggle > span {
+  font-size: 12px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.file-folder-toggle > small {
+  margin-left: auto;
+  color: var(--muted);
+  font-size: 11px;
 }
 .file-select {
   display: flex;
@@ -1478,6 +1517,12 @@ body.vscode-high-contrast-light .select-popup {
   background: var(--selection);
   color: var(--selection-fg);
 }
+.detail-files > button.detail-folder {
+  color: var(--fg);
+}
+.detail-files > button.detail-folder > .codicon {
+  flex-shrink: 0;
+}
 .detail-files > button > span:not(.codicon) {
   min-width: 0;
   flex: 1;
@@ -1509,6 +1554,11 @@ body.vscode-high-contrast-light .select-popup {
   display: flex;
   flex: 1;
   min-height: 0;
+}
+.stash-workspace.native-diff .stash-list {
+  width: auto;
+  flex: 1;
+  border-right: 0;
 }
 .stash-list {
   display: flex;

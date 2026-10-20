@@ -99,6 +99,8 @@ const commits: Commit[] = subjects.map((subject, i) => ({
 const state: Snapshot = {
   repositories: [{ name: 'atlas-web', path: '/preview/atlas-web' }],
   repository: { name: 'atlas-web', path: '/preview/atlas-web' },
+  diffTarget: new URLSearchParams(location.search).get('diff') === 'panel' ? 'panel' : 'editor',
+  fileLayout: new URLSearchParams(location.search).get('layout') === 'flat' ? 'flat' : 'tree',
   branch: 'feature/command-menu',
   detached: false,
   upstream: 'origin/feature/command-menu',
@@ -169,6 +171,10 @@ export async function previewRequest<M extends Method>(
   await new Promise((resolve) => setTimeout(resolve, 120));
   const p = params as Record<string, any>;
   if (method === 'snapshot') return structuredClone({ ...state, updatedAt: Date.now() });
+  if (method === 'setFileLayout') {
+    state.fileLayout = p.layout === 'flat' ? 'flat' : 'tree';
+    return;
+  }
   if (method === 'diff')
     return {
       path: p.path,

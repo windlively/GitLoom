@@ -35,9 +35,11 @@ GitLoom（织序）是 VS Code 扩展，借鉴 IntelliJ IDEA 的 Git 操作逻�
 | `webview/src/context-menu.tsx`、`resize.tsx` | 分支菜单、键盘操作与分栏调整                                             |
 | `webview/src/diff.ts`、`graph.ts`            | 文本差异行对齐与提交图算法                                               |
 | `webview/src/branch-groups.ts`               | 分支按命名空间前缀构建多层级目录，处理无前缀分支与远程名前缀             |
+| `webview/src/file-groups.ts`                 | 更改文件与提交详情文件按目录构建多层级列表，合并单链前缀并统计文件数     |
 | `webview/src/virtual.ts`                     | 文件列表与提交历史的虚拟滚动视口和可见范围计算                           |
 | `tests/git.test.ts`、`diff.test.ts`          | 真实临时仓库集成测试和 Diff/提交图算法测试                               |
 | `tests/branch-groups.test.ts`                | 分支前缀分组的本地、远程与多远程场景测试                                 |
+| `tests/file-groups.test.ts`                  | 目录分组、单链前缀合并、计数与特殊文件路径测试                           |
 | `tests/i18n.test.ts`                         | 语言归一化、插值、文案完整性与清单本地化测试                             |
 | `tests/host.ts`、`scripts/test-host.mjs`     | 使用隔离配置启动 VS Code 的宿主集成测试                                  |
 | `scripts/build.mjs`                          | 宿主、Webview、CSS 和字体打包                                            |

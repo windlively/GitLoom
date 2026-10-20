@@ -71,6 +71,7 @@ import { defaultSizes, restoreSizes, ResizeHandle, type PaneSizes } from './resi
 import { DialogWindow, restoreDialogFrames, type DialogFrame } from './dialog-window';
 import { BranchDropdown } from './branch-dropdown';
 import { groupBranches, type BranchFolder } from './branch-groups';
+import { groupFiles, type FileFolder } from './file-groups';
 import { ContextMenu, type MenuAction } from './context-menu';
 import { SelectMenu, type SelectOption } from './select-menu';
 import { dateLocale, t } from './i18n';
@@ -82,8 +83,10 @@ if (isPreview && new URLSearchParams(window.location.search).get('layout') === '
 }
 const panelLayout = true;
 const FILE_ROW_HEIGHT = 22,
+  FOLDER_ROW_HEIGHT = 22,
   GROUP_ROW_HEIGHT = 24;
 const NO_CHANGES: Change[] = [];
+const fileFolderKey = (groupId: string, path: string) => `${groupId}\0${path}`;
 
 type Dialog = {
   type:
@@ -503,20 +506,33 @@ function App() {
     [detail, setDetail] = useState<CommitDetail | null>(null);
   const [branchGrouped, setBranchGrouped] = useState(stored.branchGrouped === true);
   const [collapsedBranchFolders, setCollapsedBranchFolders] = useState<Set<string>>(new Set());
+  const [fileLayout, setFileLayout] = useState<Snapshot['fileLayout']>(snapshot?.fileLayout ?? 'tree');
+  const fileGrouped = fileLayout === 'tree';
+  const [collapsedFileFolders, setCollapsedFileFolders] = useState<Set<string>>(new Set());
+  const [collapsedDetailFolders, setCollapsedDetailFolders] = useState<Set<string>>(new Set());
+  useEffect(() => setFileLayout(snapshot?.fileLayout ?? 'tree'), [snapshot?.fileLayout]);
+  useEffect(() => setCollapsedDetailFolders(new Set()), [activeCommit]);
   const [historyFile, setHistoryFile] = useState(''),
     [activeStash, setActiveStash] = useState(''),
     [stashFiles, setStashFiles] = useState<Change[]>([]);
   const [stashFile, setStashFile] = useState(''),
     [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [inlinePreview, setInlinePreview] = useState(false);
   const [pushPreview, setPushPreview] = useState<PushPreview | null>(null);
   const root = useRef<string | undefined>(undefined),
     diffSequence = useRef(0),
+    lastNative = useRef({ key: '', at: 0 }),
     commitInput = useRef<HTMLTextAreaElement>(null);
   const fileViewport = useViewport(),
     logViewport = useViewport();
   const currentDraft = drafts[snapshot?.repository?.path || ''] || '';
   const changes = snapshot?.changes ?? NO_CHANGES;
   const isBusy = !!busy;
+  const diffTarget = snapshot?.diffTarget ?? 'editor';
+  const showInlineDiff = diffTarget === 'panel' || inlinePreview;
+  const activeConflict = changes.some((change) => change.path === activeFile && change.status === 'conflict');
+  const showMiddlePane = showInlineDiff || activeConflict;
+  useEffect(() => setInlinePreview(false), [diffTarget]);
   const applySnapshot = useCallback((state: Snapshot) => {
     const changedRepository = root.current !== state.repository?.path;
     if (changedRepository) {
@@ -735,10 +751,20 @@ function App() {
       cancelled = true;
     };
   }, [activeStash, view, snapshot?.repository?.path]);
+  const openNativeDiff = (path: string, commit?: string, stash?: string) => {
+    if (!path) return;
+    const key = `${path}\0${commit || ''}\0${stash || ''}`;
+    const now = Date.now();
+    if (key === lastNative.current.key && now - lastNative.current.at < 400) return;
+    lastNative.current = { key, at: now };
+    void request('openDiff', { path, ...(commit ? { commit } : {}), ...(stash ? { stash } : {}) }).catch(
+      (error) => setNotice({ message: (error as Error).message, error: true }),
+    );
+  };
   const diffFile = view === 'changes' ? activeFile : view === 'log' ? historyFile : stashFile;
   useEffect(() => {
     const sequence = ++diffSequence.current;
-    if (!diffFile || !snapshot?.repository) {
+    if (!diffFile || !snapshot?.repository || !showInlineDiff) {
       setDiff(null);
       setDiffLoading(false);
       return;
@@ -758,7 +784,15 @@ function App() {
       .finally(() => {
         if (sequence === diffSequence.current) setDiffLoading(false);
       });
-  }, [diffFile, view, activeCommit, activeStash, snapshot?.updatedAt, snapshot?.repository?.path]);
+  }, [
+    diffFile,
+    view,
+    activeCommit,
+    activeStash,
+    showInlineDiff,
+    snapshot?.updatedAt,
+    snapshot?.repository?.path,
+  ]);
   const commitPaths = (paths: string[], push = false) => {
     if (!paths.length || isBusy) return;
     setSelected(new Set(paths));
@@ -860,26 +894,101 @@ function App() {
       },
     ].filter((group) => group.files.length || (!['conflicts', 'untracked'].includes(group.id) && !fileQuery));
   }, [filteredChanges, changelists, fileQuery]);
-  const visibleFilePaths = useMemo(
-    () =>
-      groups.flatMap((group) => (collapsed.has(group.id) ? [] : group.files.map((change) => change.path))),
-    [groups, collapsed],
-  );
   const fileItems = useMemo(() => {
-    const items: ({ kind: 'group'; group: (typeof groups)[number] } | { kind: 'file'; change: Change })[] =
-      [];
+    const items: (
+      | { kind: 'group'; group: (typeof groups)[number] }
+      | { kind: 'folder'; folder: FileFolder; groupId: string; depth: number }
+      | { kind: 'file'; change: Change; depth: number }
+    )[] = [];
     const offsets = [0];
+    const pushFile = (change: Change, depth: number) => {
+      items.push({ kind: 'file', change, depth });
+      offsets.push(offsets.at(-1)! + FILE_ROW_HEIGHT);
+    };
+    const pushFolder = (groupId: string, folder: FileFolder, depth: number) => {
+      items.push({ kind: 'folder', folder, groupId, depth });
+      offsets.push(offsets.at(-1)! + FOLDER_ROW_HEIGHT);
+      if (!fileQuery && collapsedFileFolders.has(fileFolderKey(groupId, folder.path))) return;
+      for (const child of folder.folders) pushFolder(groupId, child, depth + 1);
+      for (const file of folder.files) pushFile(file.change, depth + 1);
+    };
     for (const group of groups) {
       items.push({ kind: 'group', group });
       offsets.push(offsets.at(-1)! + GROUP_ROW_HEIGHT);
       if (collapsed.has(group.id)) continue;
-      for (const change of group.files) {
-        items.push({ kind: 'file', change });
-        offsets.push(offsets.at(-1)! + FILE_ROW_HEIGHT);
+      if (fileGrouped) {
+        for (const entry of groupFiles(group.files)) {
+          if (entry.kind === 'folder') pushFolder(group.id, entry, 0);
+          else pushFile(entry.change, 0);
+        }
+      } else {
+        for (const change of group.files) pushFile(change, 0);
       }
     }
     return { items, offsets };
-  }, [groups, collapsed]);
+  }, [groups, collapsed, fileGrouped, collapsedFileFolders, fileQuery]);
+  const visibleFilePaths = useMemo(
+    () => fileItems.items.flatMap((item) => (item.kind === 'file' ? [item.change.path] : [])),
+    [fileItems],
+  );
+  const toggleFileFolder = (key: string) =>
+    setCollapsedFileFolders((previous) => {
+      const next = new Set(previous);
+      next.has(key) ? next.delete(key) : next.add(key);
+      return next;
+    });
+  const toggleFileLayout = () => {
+    const previous = fileLayout;
+    const next = previous === 'tree' ? 'flat' : 'tree';
+    setFileLayout(next);
+    void request('setFileLayout', { layout: next }).catch((error) => {
+      setFileLayout(previous);
+      setNotice({ message: (error as Error).message, error: true });
+    });
+  };
+  const toggleDetailFolder = (path: string) =>
+    setCollapsedDetailFolders((previous) => {
+      const next = new Set(previous);
+      next.has(path) ? next.delete(path) : next.add(path);
+      return next;
+    });
+  const detailItems = useMemo(() => {
+    if (!detail || fileLayout !== 'tree') return [];
+    const items: (
+      { kind: 'folder'; folder: FileFolder; depth: number } | { kind: 'file'; change: Change; depth: number }
+    )[] = [];
+    const pushFile = (change: Change, depth: number) => items.push({ kind: 'file', change, depth });
+    const pushFolder = (folder: FileFolder, depth: number) => {
+      items.push({ kind: 'folder', folder, depth });
+      if (collapsedDetailFolders.has(folder.path)) return;
+      for (const child of folder.folders) pushFolder(child, depth + 1);
+      for (const file of folder.files) pushFile(file.change, depth + 1);
+    };
+    for (const entry of groupFiles(detail.files)) {
+      if (entry.kind === 'folder') pushFolder(entry, 0);
+      else pushFile(entry.change, 0);
+    }
+    return items;
+  }, [detail, fileLayout, collapsedDetailFolders]);
+  const detailFileRow = (file: Change, depth: number) => (
+    <button
+      className={historyFile === file.path ? 'selected' : ''}
+      key={file.path}
+      title={file.path}
+      style={fileGrouped ? { paddingLeft: 26 + depth * 12 } : undefined}
+      onClick={() => {
+        setHistoryFile(file.path);
+        if (!showInlineDiff) openNativeDiff(file.path, activeCommit);
+      }}
+    >
+      <FileIcon file={file.path} />
+      <span>
+        {basename(file.path)}
+        {!fileGrouped && <small>{dirname(file.path)}</small>}
+      </span>
+      <b className={`file-status ${file.status}`}>{statusLetters[file.status]}</b>
+    </button>
+  );
   const [fileStart, fileEnd] = offsetRange(fileItems.offsets, fileViewport);
   const selectFileRow = (
     path: string,
@@ -996,12 +1105,13 @@ function App() {
   );
   const selectedFiles = [...selected];
   const openNative = () => {
-    if (diffFile)
-      void perform(
-        'openDiff',
-        { path: diffFile, ...(view === 'log' ? { commit: activeCommit } : {}) },
-        t('Open Diff'),
-      );
+    if (!diffFile) return;
+    setInlinePreview(false);
+    openNativeDiff(
+      diffFile,
+      view === 'log' ? activeCommit : undefined,
+      view === 'stash' ? activeStash : undefined,
+    );
   };
   const closeBranchDropdown = () => {
     setBranchDropdown(null);
@@ -1513,17 +1623,19 @@ function App() {
               </button>
             </Empty>
           ) : view === 'changes' ? (
-            <div className="changes-workspace">
-              <ResizeHandle
-                label={t('Resize file list')}
-                min={150}
-                target=".file-list"
-                value={sizes.files}
-                reset={defaultSizes.files}
-                onChange={resize('files')}
-                reserve=".commit-panel"
-                style={{ left: 'var(--file-width)' }}
-              />
+            <div className={`changes-workspace ${showMiddlePane ? '' : 'native-diff'}`}>
+              {showMiddlePane && (
+                <ResizeHandle
+                  label={t('Resize file list')}
+                  min={150}
+                  target=".file-list"
+                  value={sizes.files}
+                  reset={defaultSizes.files}
+                  onChange={resize('files')}
+                  reserve=".commit-panel"
+                  style={{ left: 'var(--file-width)' }}
+                />
+              )}
               <ResizeHandle
                 label={t('Resize commit panel')}
                 min={180}
@@ -1533,6 +1645,7 @@ function App() {
                 reset={defaultSizes.commit}
                 onChange={resize('commit')}
                 reserve=".file-list"
+                reserveExtra={showMiddlePane ? 160 : 0}
                 style={{ right: 'var(--commit-width)' }}
               />
               <section className="changes-panel" aria-label={t('Local changes list')}>
@@ -1563,6 +1676,20 @@ function App() {
                   >
                     <Undo2 size={14} />
                   </IconButton>
+                  <IconButton
+                    title={
+                      fileGrouped ? t('Toggle flat changed file list') : t('Group changed files by directory')
+                    }
+                    className={fileGrouped ? 'active' : ''}
+                    onClick={toggleFileLayout}
+                  >
+                    <ListTree size={15} />
+                  </IconButton>
+                  {!showInlineDiff && (
+                    <IconButton title={t('Show inline diff')} onClick={() => setInlinePreview(true)}>
+                      <GitCompareArrows size={15} />
+                    </IconButton>
+                  )}
                 </div>
                 <label className="search-box file-search">
                   <Search size={14} />
@@ -1657,12 +1784,39 @@ function App() {
                             </div>
                           );
                         }
+                        if (item.kind === 'folder') {
+                          const key = fileFolderKey(item.groupId, item.folder.path);
+                          const open = !!fileQuery || !collapsedFileFolders.has(key);
+                          return (
+                            <div
+                              className="file-folder"
+                              key={`folder:${item.groupId}:${item.folder.path}`}
+                              style={{ paddingLeft: 6 + item.depth * 12 }}
+                            >
+                              <button
+                                className="file-folder-toggle"
+                                aria-expanded={open}
+                                title={t(
+                                  open ? 'Collapse directory {0}' : 'Expand directory {0}',
+                                  item.folder.path,
+                                )}
+                                onClick={() => toggleFileFolder(key)}
+                              >
+                                {open ? <ChevronDown size={12} /> : <ChevronRight size={12} />}
+                                <FolderClosed size={13} />
+                                <span>{item.folder.name}</span>
+                                <small>{item.folder.count}</small>
+                              </button>
+                            </div>
+                          );
+                        }
                         const change = item.change;
                         const stage = stageState(change);
                         return (
                           <div
                             className={`file-row ${activeFile === change.path ? 'selected' : ''} ${fileSelection.has(change.path) ? 'marked' : ''}`}
                             key={`file:${change.path}`}
+                            style={fileGrouped ? { paddingLeft: 6 + item.depth * 12 } : undefined}
                             onContextMenu={(event) => {
                               event.preventDefault();
                               openFileMenu(change, event.clientX, event.clientY);
@@ -1686,9 +1840,27 @@ function App() {
                               className="file-select"
                               data-path={change.path}
                               title={`${change.path}\n${statusLabels[change.status]}${stage ? `\n${stage === 'staged' ? t('All changes are staged') : t('Some changes are staged; the working tree has unstaged changes')}` : ''}\n${t('Shift / {0} click to select multiple', navigator.platform.includes('Mac') ? '⌘' : 'Ctrl')}`}
-                              onClick={(event) => selectFileRow(change.path, event)}
+                              onClick={(event) => {
+                                selectFileRow(change.path, event);
+                                if (
+                                  !showInlineDiff &&
+                                  !event.shiftKey &&
+                                  !event.metaKey &&
+                                  !event.ctrlKey &&
+                                  change.status !== 'conflict'
+                                )
+                                  openNativeDiff(change.path);
+                              }}
                               onKeyDown={(event) => {
                                 if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
+                                  if (
+                                    event.key === 'Enter' &&
+                                    !showInlineDiff &&
+                                    change.status !== 'conflict'
+                                  ) {
+                                    event.preventDefault();
+                                    openNativeDiff(change.path);
+                                  }
                                   if (event.key === ' ' && !isBusy && change.status !== 'conflict') {
                                     event.preventDefault();
                                     toggle(change.path);
@@ -1716,14 +1888,14 @@ function App() {
                                 else if (event.metaKey || event.ctrlKey) setActiveFile(path);
                                 else selectFileRow(path);
                               }}
-                              onDoubleClick={() =>
-                                void perform('openDiff', { path: change.path }, t('Open Diff'))
-                              }
+                              onDoubleClick={() => {
+                                if (showInlineDiff) openNativeDiff(change.path);
+                              }}
                             >
                               <FileIcon file={change.path} />
                               <span className="file-label">
                                 <strong>{basename(change.path)}</strong>
-                                <small>{dirname(change.path) || t('Project root')}</small>
+                                {!fileGrouped && <small>{dirname(change.path) || t('Project root')}</small>}
                               </span>
                               {stage && (
                                 <span
@@ -1833,7 +2005,7 @@ function App() {
                   </div>
                 </div>
               </section>
-              {changes.find((change) => change.path === activeFile)?.status === 'conflict' ? (
+              {activeConflict ? (
                 <div className="conflict-view">
                   <Empty
                     icon={<GitMerge size={42} />}
@@ -1855,7 +2027,7 @@ function App() {
                     </button>
                   </Empty>
                 </div>
-              ) : (
+              ) : showInlineDiff ? (
                 <DiffViewer
                   split={sizes.diff}
                   setSplit={resize('diff')}
@@ -1880,7 +2052,7 @@ function App() {
                       : undefined
                   }
                 />
-              )}
+              ) : null}
             </div>
           ) : view === 'log' ? (
             <div className="history-workspace">
@@ -2100,26 +2272,59 @@ function App() {
                       <div className="detail-files-heading">
                         {t('Changed files')}
                         <span>{detail.files.length}</span>
+                        <div className="spacer" />
+                        <IconButton
+                          title={
+                            fileGrouped
+                              ? t('Toggle flat changed file list')
+                              : t('Group changed files by directory')
+                          }
+                          className={fileGrouped ? 'active' : ''}
+                          onClick={toggleFileLayout}
+                        >
+                          <ListTree size={13} />
+                        </IconButton>
+                        {!showInlineDiff && (
+                          <IconButton
+                            title={t('Show inline diff')}
+                            disabled={!historyFile}
+                            onClick={() => setInlinePreview(true)}
+                          >
+                            <GitCompareArrows size={13} />
+                          </IconButton>
+                        )}
                       </div>
                       <div className="detail-files">
-                        {detail.files.map((file) => (
-                          <button
-                            className={historyFile === file.path ? 'selected' : ''}
-                            key={file.path}
-                            title={file.path}
-                            onClick={() => setHistoryFile(file.path)}
-                          >
-                            <FileIcon file={file.path} />
-                            <span>
-                              {basename(file.path)}
-                              <small>{dirname(file.path)}</small>
-                            </span>
-                            <b className={`file-status ${file.status}`}>{statusLetters[file.status]}</b>
-                          </button>
-                        ))}
+                        {fileGrouped
+                          ? detailItems.map((item) =>
+                              item.kind === 'folder' ? (
+                                <button
+                                  className="detail-folder"
+                                  key={`folder:${item.folder.path}`}
+                                  title={item.folder.path}
+                                  aria-expanded={!collapsedDetailFolders.has(item.folder.path)}
+                                  style={{ paddingLeft: 8 + item.depth * 12 }}
+                                  onClick={() => toggleDetailFolder(item.folder.path)}
+                                >
+                                  {collapsedDetailFolders.has(item.folder.path) ? (
+                                    <ChevronRight size={12} />
+                                  ) : (
+                                    <ChevronDown size={12} />
+                                  )}
+                                  <FolderClosed size={13} />
+                                  <span>{item.folder.name}</span>
+                                  <small>{item.folder.count}</small>
+                                </button>
+                              ) : (
+                                detailFileRow(item.change, item.depth)
+                              ),
+                            )
+                          : detail.files.map((file) => detailFileRow(file, 0))}
                       </div>
                       <p className="detail-tip">
-                        {t('Select a file to view its changes from this commit below.')}
+                        {showInlineDiff
+                          ? t('Select a file to view its changes from this commit below.')
+                          : t('Select a file to open its diff in the main editor.')}
                       </p>
                     </>
                   ) : (
@@ -2130,7 +2335,7 @@ function App() {
                   )}
                 </aside>
               </div>
-              {historyFile && (
+              {historyFile && showInlineDiff && (
                 <div className="history-diff">
                   <DiffViewer
                     split={sizes.diff}
@@ -2144,21 +2349,32 @@ function App() {
               )}
             </div>
           ) : (
-            <div className="stash-workspace">
-              <ResizeHandle
-                label={t('Resize Stash list')}
-                min={160}
-                target=".stash-list"
-                value={sizes.stash}
-                reset={defaultSizes.stash}
-                onChange={resize('stash')}
-                style={{ left: 'var(--stash-width)' }}
-              />
+            <div className={`stash-workspace ${showInlineDiff ? '' : 'native-diff'}`}>
+              {showInlineDiff && (
+                <ResizeHandle
+                  label={t('Resize Stash list')}
+                  min={160}
+                  target=".stash-list"
+                  value={sizes.stash}
+                  reset={defaultSizes.stash}
+                  onChange={resize('stash')}
+                  style={{ left: 'var(--stash-width)' }}
+                />
+              )}
               <section className="stash-list">
                 <div className="panel-toolbar">
                   <strong>{t('Stashed changes')}</strong>
                   <span className="count">{snapshot.stashes.length}</span>
                   <div className="spacer" />
+                  {!showInlineDiff && (
+                    <IconButton
+                      title={t('Show inline diff')}
+                      disabled={!stashFile}
+                      onClick={() => setInlinePreview(true)}
+                    >
+                      <GitCompareArrows size={15} />
+                    </IconButton>
+                  )}
                   <IconButton
                     title={t('Stash all current changes')}
                     disabled={isBusy || !changes.length}
@@ -2228,7 +2444,10 @@ function App() {
                     <button
                       key={file.path}
                       className={stashFile === file.path ? 'selected' : ''}
-                      onClick={() => setStashFile(file.path)}
+                      onClick={() => {
+                        setStashFile(file.path);
+                        if (!showInlineDiff) openNativeDiff(file.path, undefined, activeStash);
+                      }}
                     >
                       <FileIcon file={file.path} />
                       <span>
@@ -2240,13 +2459,15 @@ function App() {
                   ))}
                 </div>
               </section>
-              <DiffViewer
-                split={sizes.diff}
-                setSplit={resize('diff')}
-                diff={diff}
-                loading={diffLoading}
-                openNative={openNative}
-              />
+              {showInlineDiff && (
+                <DiffViewer
+                  split={sizes.diff}
+                  setSplit={resize('diff')}
+                  diff={diff}
+                  loading={diffLoading}
+                  openNative={openNative}
+                />
+              )}
             </div>
           )}
           {consoleOpen && (

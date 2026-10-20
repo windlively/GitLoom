@@ -2,7 +2,7 @@
   "name": "gitloom",
   "displayName": "GitLoom",
   "description": "%extension.description%",
-  "version": "0.5.5",
+  "version": "0.5.8",
   "publisher": "windlively",
   "license": "MIT",
   "repository": {
@@ -110,6 +110,32 @@
     "configuration": {
       "title": "GitLoom",
       "properties": {
+        "gitWorkbench.diffTarget": {
+          "type": "string",
+          "enum": [
+            "editor",
+            "panel"
+          ],
+          "enumDescriptions": [
+            "%config.diffTarget.editor%",
+            "%config.diffTarget.panel%"
+          ],
+          "default": "editor",
+          "description": "%config.diffTarget.description%"
+        },
+        "gitWorkbench.fileLayout": {
+          "type": "string",
+          "enum": [
+            "tree",
+            "flat"
+          ],
+          "enumDescriptions": [
+            "%config.fileLayout.tree%",
+            "%config.fileLayout.flat%"
+          ],
+          "default": "tree",
+          "description": "%config.fileLayout.description%"
+        },
         "gitWorkbench.historyLimit": {
           "type": "number",
           "default": 300,
@@ -138,7 +164,7 @@
     "test": "tsx --test tests/*.test.ts",
     "test:host": "node scripts/test-host.mjs",
     "vscode:prepublish": "npm run check && npm run build",
-    "package": "vsce package --no-dependencies --out artifacts/gitloom-0.5.5.vsix"
+    "package": "vsce package --no-dependencies --out artifacts/gitloom-0.5.8.vsix"
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.46-24",

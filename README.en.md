@@ -29,7 +29,7 @@ Commit history, graph, and details (light theme):
 
 The workbench uses a native VS Code panel container and does not open an editor tab. Drag the top edge to resize it, use VS Code's maximize, collapse, and close buttons, or press `Cmd+J` / `Ctrl+J` to toggle the bottom panel. Switching to the terminal and back preserves the workbench and commit draft.
 
-The bottom panel uses a compact layout: repository, branch, Git views, and sync actions at the top; file list, inline diff, and commit box arranged in columns. Drag the boundaries of the branch pane, file list, commit area, history details, Stash list, and left/right diff panes to resize them; the widths are remembered. Double-click a boundary to restore its default; focus a boundary and use the arrow keys to fine-tune, or Shift + arrow keys for 40px steps. In narrow windows, manage branches from the top branch picker.
+The bottom panel uses a compact layout: repository, branch, Git views, and sync actions at the top; file list, diff (opened in the VS Code editor by default, with an option for the inline panel), and commit box arranged in columns. Drag the boundaries of the branch pane, file list, commit area, history details, Stash list, and left/right diff panes to resize them; the widths are remembered. Double-click a boundary to restore its default; focus a boundary and use the arrow keys to fine-tune, or Shift + arrow keys for 40px steps. In narrow windows, manage branches from the top branch picker.
 
 Dialogs such as branch selection and push preview can be moved by dragging their title bar and resized from the edges or corners; double-click the title bar to restore the default position and size, and reopened dialogs reuse the last size.
 
@@ -40,6 +40,7 @@ The UI follows VS Code's native component style, inheriting panel, list, input, 
 ### Local changes and commits
 
 - Files are grouped by change list, with untracked files and merge conflicts shown separately.
+- Changed files and commit detail files are shown as a directory tree by default; folders collapse level by level, single-child chains such as `webview/src` are compacted into one row with a file count, and the toolbar grouping button or the `gitWorkbench.fileLayout` setting switches to a flat list with full paths.
 - Check files or an entire change list, then click a file to review its side-by-side diff.
 - File rows support IntelliJ IDEA-style selection: click to select, `Shift` to select a range, and `Cmd` / `Ctrl` to toggle multiple selections. Right-click a multi-selection to **Add to Git** (stage to the index) or **Commit Selected Files** directly. Row selection and commit checkboxes are independent.
 - Staged and partially staged files display status badges; staging affects only the selected files and leaves other changes untouched.
@@ -93,12 +94,14 @@ The UI follows VS Code's native component style, inheriting panel, list, input, 
 
 ```json
 {
+  "gitWorkbench.diffTarget": "editor",
+  "gitWorkbench.fileLayout": "tree",
   "gitWorkbench.historyLimit": 300,
   "gitWorkbench.pullStrategy": "ff-only"
 }
 ```
 
-`historyLimit` accepts 50–2000; history filtering applies to loaded commits only. `pullStrategy` supports `ff-only`, `rebase`, and `merge`. The Git executable follows VS Code's `git.path`.
+`diffTarget` controls where file diffs open: `editor` (default) opens VS Code's native diff in the main editor, while `panel` keeps the inline diff inside the bottom panel. This applies to changes, commit history, and Stash files; in `editor` mode the panel does not reserve a diff column, and the diff button in the toolbar can temporarily switch to the inline diff. `fileLayout` controls how changed files and commit detail files are displayed: the default `tree` groups them by directory, while `flat` lists full paths; the grouping buttons in both toolbars update this setting. `historyLimit` accepts 50–2000; history filtering applies to loaded commits only. `pullStrategy` supports `ff-only`, `rebase`, and `merge`. The Git executable follows VS Code's `git.path`.
 
 The Marketplace extension ID is `windlively.gitloom`. If you installed an early VSIX under `local-workbench.git-workbench`, uninstall the old ID before installing the Marketplace build; command and setting prefixes remain `gitWorkbench.*`, so existing settings continue to work.
 
@@ -137,7 +140,7 @@ Git is invoked with separate arguments and literal path matching, never through 
 
 ## Current scope
 
-This is the installable 0.5.5 release covering the workflows above. IntelliJ IDEA's line/hunk-level commits, interactive rebase, shelf patches, blame, remote repository configuration UI, and dedicated Git LFS management are not implemented yet; submodules appear as file statuses without a dedicated management view.
+This is the installable 0.5.8 release covering the workflows above. IntelliJ IDEA's line/hunk-level commits, interactive rebase, shelf patches, blame, remote repository configuration UI, and dedicated Git LFS management are not implemented yet; submodules appear as file statuses without a dedicated management view.
 
 Inline text preview is limited to 1 MB; native text diffs support up to 20 MB. Native comparison is not available for binary files in history. The workbench shows on-disk content; unsaved edits are saved before commit or stash. Auto-refresh runs every 8 seconds while the window is focused and the workbench is visible; saving files and focusing the window also refresh.
 

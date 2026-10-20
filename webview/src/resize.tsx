@@ -26,6 +26,7 @@ export function ResizeHandle({
   percent = false,
   min = 140,
   reserve = 200,
+  reserveExtra = 160,
   style,
   className = '',
 }: {
@@ -38,6 +39,7 @@ export function ResizeHandle({
   percent?: boolean;
   min?: number;
   reserve?: number | string;
+  reserveExtra?: number;
   style: CSSProperties;
   className?: string;
 }) {
@@ -56,7 +58,7 @@ export function ResizeHandle({
       max:
         width -
         (typeof reserve === 'string'
-          ? (parent.querySelector<HTMLElement>(reserve)?.getBoundingClientRect().width || 180) + 160
+          ? (parent.querySelector<HTMLElement>(reserve)?.getBoundingClientRect().width || 180) + reserveExtra
           : reserve),
     };
   };

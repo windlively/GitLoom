@@ -4,6 +4,12 @@
   "command.commit": "提交更改",
   "command.log": "查看提交历史",
   "command.push": "推送提交",
+  "config.diffTarget.description": "文件差异的打开位置。默认在 VS Code 编辑器中打开，也可以保留在 GitLoom 底部面板内。",
+  "config.diffTarget.editor": "在 VS Code 编辑器中打开文件差异。",
+  "config.diffTarget.panel": "在 GitLoom 面板中打开文件差异。",
+  "config.fileLayout.description": "更改文件列表与提交详情文件列表的显示方式。",
+  "config.fileLayout.tree": "按目录分组，以可折叠的树形结构显示文件。",
+  "config.fileLayout.flat": "平铺显示文件，并保留完整路径。",
   "config.historyLimit.description": "一次加载的提交数量。",
   "config.pullStrategy.description": "更新项目的策略，默认仅快进，避免意外产生合并提交。"
 }

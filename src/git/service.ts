@@ -134,7 +134,9 @@ export class GitService {
     }
   }
 
-  async snapshot(limit = 300): Promise<Omit<Snapshot, 'repositories' | 'repository' | 'changelists'>> {
+  async snapshot(
+    limit = 300,
+  ): Promise<Omit<Snapshot, 'repositories' | 'repository' | 'changelists' | 'diffTarget' | 'fileLayout'>> {
     const head = (await this.optional(['rev-parse', '--verify', 'HEAD'])).trim();
     const [
       status,

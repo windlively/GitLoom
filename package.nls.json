@@ -4,6 +4,12 @@
   "command.commit": "Commit Changes",
   "command.log": "View Commit History",
   "command.push": "Push Commits",
+  "config.diffTarget.description": "Where to open file diffs. The VS Code editor is the default; the GitLoom panel keeps diffs inside the bottom panel.",
+  "config.diffTarget.editor": "Open file diffs in the VS Code editor.",
+  "config.diffTarget.panel": "Open file diffs in the GitLoom panel.",
+  "config.fileLayout.description": "How to display changed files and commit detail files.",
+  "config.fileLayout.tree": "Group files by directory with collapsible folders.",
+  "config.fileLayout.flat": "List files flat with their full paths.",
   "config.historyLimit.description": "Number of commits to load at once.",
   "config.pullStrategy.description": "Strategy for updating the project. Fast-forward only by default to avoid unexpected merge commits."
 }

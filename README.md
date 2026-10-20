@@ -27,7 +27,7 @@ GitLoom is a compact Git workbench for VS Code's bottom panel: review changes wi
 
 工作台使用 VS Code 原生面板容器，打开时不创建编辑器标签页。可以拖动面板上边缘调整高度，使用 VS Code 面板的最大化、收起和关闭按钮，也可以用 `Cmd+J` / `Ctrl+J` 显示或隐藏底部面板。切换到终端再切回时保留工作台和提交草稿。
 
-底部采用紧凑布局：顶部为仓库、分支、Git 视图与同步操作；文件列表、内嵌 Diff、提交框按列排列。分支栏、文件列表、提交栏、历史详情、Stash 列表和左右 Diff 均可拖动边界调整宽度，并记住设置。双击边界恢复默认；聚焦边界后按左右方向键可微调，Shift + 方向键每次调整 40px。窄窗口通过顶部分支选择器管理分支。
+底部采用紧凑布局：顶部为仓库、分支、Git 视图与同步操作；文件列表、Diff（默认在 VS Code 主编辑器打开，也可切换为面板内嵌）、提交框按列排列。分支栏、文件列表、提交栏、历史详情、Stash 列表和左右 Diff 均可拖动边界调整宽度，并记住设置。双击边界恢复默认；聚焦边界后按左右方向键可微调，Shift + 方向键每次调整 40px。窄窗口通过顶部分支选择器管理分支。
 
 分支选择、推送预览等对话框可通过标题栏拖动位置，拖动边缘或四角调整大小；双击标题栏恢复默认位置和大小，关闭后再次打开会沿用上次的尺寸。
 
@@ -38,6 +38,7 @@ GitLoom is a compact Git workbench for VS Code's bottom panel: review changes wi
 ### 本地更改与提交
 
 - 按更改列表组织文件，单独展示未版本化文件和合并冲突。
+- 更改文件与提交详情的文件列表默认按目录树展示，目录可逐级折叠，单链路径（如 `webview/src`）合并为一行并显示文件数；工具栏的分组按钮或 `gitWorkbench.fileLayout` 设置可切换为保留完整路径的平铺列表。
 - 勾选文件或整个更改列表，单击文件审查双栏 Diff。
 - 文件行支持 IDEA 式选择：单击选中，`Shift` 连选，`Cmd` / `Ctrl` 切换多选。右键多选文件可 **添加到 Git** 暂存到索引，或直接 **提交所选文件**。行选择与提交复选框相互独立。
 - 已暂存和部分暂存的文件会显示状态徽标；暂存只影响所选文件，其他未选更改保持不变。
@@ -91,12 +92,14 @@ GitLoom is a compact Git workbench for VS Code's bottom panel: review changes wi
 
 ```json
 {
+  "gitWorkbench.diffTarget": "editor",
+  "gitWorkbench.fileLayout": "tree",
   "gitWorkbench.historyLimit": 300,
   "gitWorkbench.pullStrategy": "ff-only"
 }
 ```
 
-`historyLimit` 支持 50–2000；历史筛选只针对已加载的提交。`pullStrategy` 支持 `ff-only`、`rebase`、`merge`。Git 可执行文件沿用 VS Code 的 `git.path`。
+`diffTarget` 决定文件差异的打开位置：默认 `editor` 在 VS Code 主编辑器打开原生 Diff；设为 `panel` 则继续在底部面板内显示内嵌 Diff。更改列表、提交历史和 Stash 文件均适用；在 `editor` 模式下，面板不保留 Diff 栏，可从工具栏的 Diff 按钮临时切换到内嵌 Diff。`fileLayout` 控制更改列表与提交详情的文件展示：默认 `tree` 按目录分组，`flat` 平铺显示完整路径；两处工具栏的分组按钮会同步更新该设置。`historyLimit` 支持 50–2000；历史筛选只针对已加载的提交。`pullStrategy` 支持 `ff-only`、`rebase`、`merge`。Git 可执行文件沿用 VS Code 的 `git.path`。
 
 商店版本的扩展 ID 为 `windlively.gitloom`。早期以 VSIX 安装过 `local-workbench.git-workbench` 的用户，建议先卸载旧 ID 再安装商店版本；命令与设置前缀仍保留 `gitWorkbench.*`，原有设置继续生效。
 
@@ -135,7 +138,7 @@ Git 使用独立参数调用，文件路径使用字面路径匹配，不经过 
 
 ## 当前边界
 
-这是可安装的 0.5.5 版本，覆盖上述日常流程。尚未实现 IDEA 的逐行/逐块提交、交互式 Rebase、Shelf 补丁、Blame、远程仓库配置界面和 Git LFS 专用管理；子模块以文件状态展示，不提供独立管理视图。
+这是可安装的 0.5.8 版本，覆盖上述日常流程。尚未实现 IDEA 的逐行/逐块提交、交互式 Rebase、Shelf 补丁、Blame、远程仓库配置界面和 Git LFS 专用管理；子模块以文件状态展示，不提供独立管理视图。
 
 内嵌文本预览限制 1 MB；原生文本 Diff 最多 20 MB。历史二进制文件不提供原生比较。工作台展示磁盘内容，未保存的编辑在提交或 Stash 前保存。自动刷新在窗口聚焦且工作台可见时每 8 秒运行，保存文件和重新聚焦窗口也会刷新。
 

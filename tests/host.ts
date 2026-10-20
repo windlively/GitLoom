@@ -74,6 +74,33 @@ export async function run() {
     );
     let state: Snapshot = reply.result;
     assert.equal(state.repository?.path, root);
+    assert.equal(state.diffTarget, 'editor', 'file diffs default to the VS Code editor');
+    assert.equal(state.fileLayout, 'tree', 'file lists default to the directory tree');
+    await vscode.workspace
+      .getConfiguration('gitWorkbench')
+      .update('diffTarget', 'panel', vscode.ConfigurationTarget.Global);
+    await vscode.workspace
+      .getConfiguration('gitWorkbench')
+      .update('fileLayout', 'flat', vscode.ConfigurationTarget.Global);
+    state = (await rpc('snapshot', {})).result;
+    assert.equal(state.diffTarget, 'panel', 'diffTarget setting reaches the webview snapshot');
+    assert.equal(state.fileLayout, 'flat', 'fileLayout setting reaches the webview snapshot');
+    await vscode.workspace
+      .getConfiguration('gitWorkbench')
+      .update('diffTarget', undefined, vscode.ConfigurationTarget.Global);
+    await vscode.workspace
+      .getConfiguration('gitWorkbench')
+      .update('fileLayout', undefined, vscode.ConfigurationTarget.Global);
+    reply = await rpc('setFileLayout', { layout: 'flat' });
+    assert.equal(reply.error, undefined, 'the webview can save the file layout setting');
+    assert.equal(
+      vscode.workspace.getConfiguration('gitWorkbench').get('fileLayout'),
+      'flat',
+      'the layout toggle writes user settings',
+    );
+    await vscode.workspace
+      .getConfiguration('gitWorkbench')
+      .update('fileLayout', undefined, vscode.ConfigurationTarget.Global);
     assert.equal(state.changes.length, 2);
     const resolvedView = internal.panel;
     const hidden = new Promise<void>((resolve, reject) => {

@@ -38,9 +38,13 @@ export interface Repository {
   path: string;
   name: string;
 }
+export type DiffTarget = 'editor' | 'panel';
+export type FileLayout = 'tree' | 'flat';
 export interface Snapshot {
   repositories: Repository[];
   repository: Repository | null;
+  diffTarget: DiffTarget;
+  fileLayout: FileLayout;
   branch: string;
   detached: boolean;
   upstream: string;
@@ -124,7 +128,8 @@ export interface Requests {
   markResolved: { params: { path: string }; result: string };
   resolve: { params: { path: string }; result: void };
   openFile: { params: { path: string }; result: void };
-  openDiff: { params: { path: string; commit?: string }; result: void };
+  openDiff: { params: { path: string; commit?: string; stash?: string }; result: void };
+  setFileLayout: { params: { layout: FileLayout }; result: void };
   pickRepository: { params: Record<string, never>; result: void };
   changelist: {
     params: { action: 'create' | 'move' | 'delete'; id?: string; name?: string; paths?: string[] };

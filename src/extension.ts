@@ -4,7 +4,17 @@ import { randomBytes, randomUUID } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import { GitService } from './git/service';
 import { normalizeLocale, translate, type Locale } from './shared/i18n';
-import type { Activity, Changelist, Method, Repository, Requests, Snapshot, View } from './shared/types';
+import type {
+  Activity,
+  Changelist,
+  DiffTarget,
+  FileLayout,
+  Method,
+  Repository,
+  Requests,
+  Snapshot,
+  View,
+} from './shared/types';
 
 const METHODS: Method[] = [
   'snapshot',
@@ -35,6 +45,7 @@ const METHODS: Method[] = [
   'resolve',
   'openFile',
   'openDiff',
+  'setFileLayout',
   'pickRepository',
   'changelist',
   'cherryPick',
@@ -54,6 +65,7 @@ const READ_ONLY = new Set<Method>([
   'stashFiles',
   'openFile',
   'openDiff',
+  'setFileLayout',
   'resolve',
   'pickRepository',
 ]);
@@ -148,6 +160,15 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       }),
     );
     this.disposables.push(vscode.workspace.onDidSaveTextDocument(() => this.scheduleRefresh(true)));
+    this.disposables.push(
+      vscode.workspace.onDidChangeConfiguration((event) => {
+        if (
+          event.affectsConfiguration('gitWorkbench.diffTarget') ||
+          event.affectsConfiguration('gitWorkbench.fileLayout')
+        )
+          void this.refresh(true);
+      }),
+    );
     this.disposables.push(
       vscode.workspace.onDidChangeWorkspaceFolders(() => {
         void this.discover(true).then(() => this.refresh(true));
@@ -361,11 +382,21 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
   }
 
   private async snapshot(): Promise<Snapshot> {
+    const diffTarget: DiffTarget =
+      vscode.workspace.getConfiguration('gitWorkbench').get<DiffTarget>('diffTarget', 'editor') === 'panel'
+        ? 'panel'
+        : 'editor';
+    const fileLayout: FileLayout =
+      vscode.workspace.getConfiguration('gitWorkbench').get<FileLayout>('fileLayout', 'tree') === 'flat'
+        ? 'flat'
+        : 'tree';
     await this.discover(!this.service);
     if (!this.service)
       return {
         repositories: this.repositories,
         repository: null,
+        diffTarget,
+        fileLayout,
         branch: '',
         detached: false,
         upstream: '',
@@ -392,6 +423,8 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       ...state,
       repositories: this.repositories,
       repository: this.repositories.find((repo) => repo.path === git.root)!,
+      diffTarget,
+      fileLayout,
       changelists: this.changelists(git.root),
     };
   }
@@ -509,6 +542,20 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       if (!this.repositories.some((repo) => repo.path === root))
         this.repositories.push({ path: root, name: path.basename(root) });
       this.selectRepository(root);
+      return;
+    }
+    if (method === 'setFileLayout') {
+      const layout = string('layout');
+      if (layout !== 'tree' && layout !== 'flat') throw new Error(this.t('Invalid parameter: {0}', 'layout'));
+      const configuration = vscode.workspace.getConfiguration('gitWorkbench');
+      const inspected = configuration.inspect<FileLayout>('fileLayout');
+      const target =
+        inspected?.workspaceFolderValue !== undefined
+          ? vscode.ConfigurationTarget.WorkspaceFolder
+          : inspected?.workspaceValue !== undefined
+            ? vscode.ConfigurationTarget.Workspace
+            : vscode.ConfigurationTarget.Global;
+      await configuration.update('fileLayout', layout, target);
       return;
     }
     const git = this.service;
@@ -674,7 +721,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         });
         return;
       case 'openDiff':
-        return this.openDiff(git, string('path'), string('commit', true));
+        return this.openDiff(git, string('path'), string('commit', true), string('stash', true));
       case 'cherryPick':
         return git.cherryPick(string('hash'));
       case 'revert': {
@@ -750,10 +797,10 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       .showWarningMessage(message, { modal: true, detail }, button)
       .then((choice) => choice === button);
   }
-  private async openDiff(git: GitService, file: string, commit?: string) {
-    const diff = await git.diff(file, { commit: commit || undefined, full: true });
+  private async openDiff(git: GitService, file: string, commit?: string, stash?: string) {
+    const diff = await git.diff(file, { commit: commit || undefined, stash: stash || undefined, full: true });
     if (diff.binary) {
-      if (!commit) {
+      if (!commit && !stash) {
         await vscode.commands.executeCommand('git.openChange', vscode.Uri.file(await git.safePath(file)));
         return;
       }
@@ -766,8 +813,8 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
     const scheme = 'git-workbench-preview';
     const token = randomUUID();
     const before = vscode.Uri.from({ scheme, path: `/${token}/before/${file}` });
-    let virtualAfter = !!commit;
-    if (!commit) {
+    let virtualAfter = !!commit || !!stash;
+    if (!commit && !stash) {
       try {
         virtualAfter = (await lstat(await git.safePath(file))).isSymbolicLink();
       } catch (error) {
