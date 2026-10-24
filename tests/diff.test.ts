@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { makeDiffRows } from '../webview/src/diff';
-import { graphColors, makeGraph } from '../webview/src/graph';
+import { graphColors, graphColumnWidth, makeGraph } from '../webview/src/graph';
 import { offsetRange, uniformRange } from '../webview/src/virtual';
 import type { Commit } from '../src/shared/types';
 test('side-by-side diff aligns additions, removals and changed line numbers', () => {
@@ -83,6 +83,25 @@ test('history graph indexes edges by row so a visible window draws only its own 
     const edges = graph.edges.slice(graph.rowEdges[row], graph.rowEdges[row + 1]);
     assert.ok(edges.every((edge) => edge.key.startsWith(`${commits[row].hash}-`)));
   }
+});
+
+test('history graph reports per-row lane counts so the column can follow the visible rows', () => {
+  const commits = [
+    commit('merge', ['a', 'b', 'c', 'd', 'e']),
+    commit('a'),
+    commit('b'),
+    commit('c'),
+    commit('d'),
+    commit('e'),
+  ];
+  const graph = makeGraph(commits);
+  // The fan-out row needs five lanes, the last row needs one, so a window near the
+  // bottom stays narrow instead of reserving the width of the whole history.
+  assert.deepEqual(graph.rowLanes, [5, 5, 4, 3, 2, 1]);
+  assert.equal(graph.rowLanes.length, commits.length);
+  assert.equal(graph.width, 76);
+  assert.equal(graphColumnWidth(1), 64);
+  assert.equal(graphColumnWidth(44), 544);
 });
 
 test('virtual ranges cover the viewport with overscan and stay inside the list', () => {

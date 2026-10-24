@@ -39,6 +39,12 @@ function countFolder(folder: BranchFolder): number {
   return folder.count;
 }
 
+// IDEA keeps the checked-out branch at the top of the local list; everything else keeps
+// the order it arrived in (the host sorts branches by name).
+export function currentFirst<T extends { current: boolean }>(branches: T[]): T[] {
+  return [...branches].sort((a, b) => Number(b.current) - Number(a.current));
+}
+
 export function groupBranches(branches: Branch[], remotes: string[] = []): BranchListEntry[] {
   const root: BranchFolder = {
     kind: 'folder',
@@ -74,8 +80,5 @@ export function groupBranches(branches: Branch[], remotes: string[] = []): Branc
   }
   sortFolder(root);
   countFolder(root);
-  return [
-    ...root.folders,
-    ...root.branches.map((entry) => ({ kind: 'branch' as const, ...entry })),
-  ];
+  return [...root.folders, ...root.branches.map((entry) => ({ kind: 'branch' as const, ...entry }))];
 }

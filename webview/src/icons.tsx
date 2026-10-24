@@ -20,6 +20,8 @@ function icon(name: string) {
 export const ArrowDown = icon('arrow-down');
 export const ArrowDownToLine = icon('cloud-download');
 export const ArrowLeftRight = icon('split-horizontal');
+export const ArrowRight = icon('arrow-right');
+export const ArrowSwap = icon('arrow-swap');
 export const ArrowUp = icon('arrow-up');
 export const ArrowUpFromLine = icon('cloud-upload');
 export const BookOpen = icon('book');
@@ -46,6 +48,7 @@ export const GitCommitHorizontal = icon('git-commit');
 export const GitCompareArrows = icon('diff');
 export const GitFork = icon('repo-forked');
 export const GitMerge = icon('git-merge');
+export const GoToFile = icon('go-to-file');
 export const History = icon('history');
 export const Info = icon('info');
 export const Layers = icon('archive');

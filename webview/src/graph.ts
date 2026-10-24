@@ -4,6 +4,9 @@ export const COMMIT_ROW_HEIGHT = 24;
 
 // Compact swimlanes and rounded elbows follow VS Code's Source Control Graph.
 const LANE_WIDTH = COMMIT_ROW_HEIGHT / 2;
+const MIN_GRAPH_WIDTH = 64;
+export const graphColumnWidth = (lanes: number) =>
+  Math.max(MIN_GRAPH_WIDTH, Math.ceil((Math.max(1, lanes) + 1) * LANE_WIDTH + 4));
 const CURVE_RADIUS = 5;
 const PALETTE = [
   'var(--vscode-scmGraph-foreground1, #ffb000)',
@@ -95,6 +98,9 @@ export function makeGraph(commits: Commit[]) {
 
   const edges: GraphEdge[] = [];
   const nodes: GraphNode[] = [];
+  // rowLanes[i] is how many swimlanes row i occupies, so the graph column can be
+  // sized from the visible rows instead of the densest merge anywhere in history.
+  const rowLanes: number[] = [];
   // rowEdges[i] is the index of the first edge drawn in row i, so a visible row range maps to an edge slice.
   const rowEdges: number[] = [];
   const center = (index: number) => (index + 1) * LANE_WIDTH;
@@ -106,6 +112,7 @@ export function makeGraph(commits: Commit[]) {
 
   rows.forEach((row, rowIndex) => {
     rowEdges.push(edges.length);
+    rowLanes.push(Math.max(row.input.length, row.output.length, row.lane + 1));
     const { commit, input, output } = row;
     const top = rowIndex * COMMIT_ROW_HEIGHT;
     const middle = top + COMMIT_ROW_HEIGHT / 2;
@@ -173,5 +180,5 @@ export function makeGraph(commits: Commit[]) {
   });
 
   rowEdges.push(edges.length);
-  return { nodes, edges, rowEdges, width: Math.max(64, Math.ceil((lanes + 1) * LANE_WIDTH + 4)) };
+  return { nodes, edges, rowEdges, rowLanes, width: graphColumnWidth(lanes) };
 }

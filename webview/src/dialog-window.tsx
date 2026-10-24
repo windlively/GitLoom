@@ -10,6 +10,9 @@ import {
 
 export type DialogFrame = { x: number; y: number; width: number; height: number };
 export type DialogFrames = Record<string, DialogFrame>;
+// Viewport rectangle of the control that opened a light-weight dialog, so it can
+// open next to the button instead of in the middle of the panel.
+export type DialogAnchor = { x: number; y: number; width: number; height: number };
 
 type Edge = 'n' | 's' | 'e' | 'w' | 'ne' | 'nw' | 'se' | 'sw';
 type Mode = 'move' | Edge;
@@ -102,6 +105,7 @@ const resizeFrame = (start: DialogFrame, edge: Edge, dx: number, dy: number, bou
 export function DialogWindow({
   savedFrame,
   onFrameChange,
+  anchor,
   defaultWidth = 480,
   className = '',
   titleId,
@@ -109,17 +113,48 @@ export function DialogWindow({
 }: {
   savedFrame?: DialogFrame;
   onFrameChange?: (frame: DialogFrame | undefined) => void;
+  anchor?: DialogAnchor;
   defaultWidth?: number;
   className?: string;
   titleId?: string;
   children: ReactNode;
 }) {
   const shell = useRef<HTMLDivElement>(null);
+  // Anchored dialogs are popovers: they follow the control that opened them, so a
+  // remembered frame would drop them next to a button that has since moved.
+  const popover = !!anchor;
   const [frame, setFrame] = useState<DialogFrame | null>(savedFrame ?? null);
+  const [placement, setPlacement] = useState<{ left: number; top: number } | null>(null);
   const frameRef = useRef<DialogFrame | null>(frame);
   const session = useRef<(() => void) | null>(null);
   const onFrameChangeRef = useRef(onFrameChange);
   onFrameChangeRef.current = onFrameChange;
+
+  useLayoutEffect(() => {
+    if (!anchor) return;
+    const element = shell.current;
+    if (!element) return;
+    const place = () => {
+      const rect = element.getBoundingClientRect();
+      const width = rect.width || defaultWidth;
+      const height = rect.height;
+      const gap = 6;
+      const left = clamp(anchor.x, EDGE_GAP, window.innerWidth - width - EDGE_GAP);
+      let top = anchor.y + anchor.height + gap;
+      // Flip above the anchor when the popover would run past the bottom edge.
+      if (top + height + EDGE_GAP > window.innerHeight && anchor.y - height - gap >= EDGE_GAP)
+        top = anchor.y - height - gap;
+      setPlacement({ left, top: clamp(top, EDGE_GAP, window.innerHeight - height - EDGE_GAP) });
+    };
+    place();
+    window.addEventListener('resize', place);
+    const observer = typeof ResizeObserver === 'undefined' ? null : new ResizeObserver(place);
+    observer?.observe(element);
+    return () => {
+      window.removeEventListener('resize', place);
+      observer?.disconnect();
+    };
+  }, [anchor, defaultWidth]);
 
   useLayoutEffect(() => {
     const element = shell.current;
@@ -224,37 +259,46 @@ export function DialogWindow({
   return (
     <div
       ref={shell}
-      className={`dialog-shell${frame ? ' framed' : ''}`}
+      className={`dialog-shell${popover ? ' popover' : frame ? ' framed' : ''}`}
       style={
-        (frame
-          ? { left: frame.x, top: frame.y, width: frame.width, height: frame.height }
-          : { width: defaultWidth }) satisfies CSSProperties
+        (popover
+          ? {
+              left: placement?.left ?? 0,
+              top: placement?.top ?? 0,
+              width: defaultWidth,
+              visibility: placement ? undefined : 'hidden',
+            }
+          : frame
+            ? { left: frame.x, top: frame.y, width: frame.width, height: frame.height }
+            : { width: defaultWidth }) satisfies CSSProperties
       }
     >
       <section
         className={`modal${className ? ` ${className}` : ''}`}
         role="dialog"
-        aria-modal="true"
+        aria-modal={popover ? undefined : true}
         aria-labelledby={titleId}
         onPointerDown={(event) => {
+          if (popover) return;
           if (interactive(event.target) || !(event.target instanceof Element)) return;
           if (event.target.closest('.modal-header')) startSession(event, 'move');
         }}
         onDoubleClick={(event) => {
-          if (interactive(event.target)) return;
+          if (popover || interactive(event.target)) return;
           if (event.target instanceof Element && event.target.closest('.modal-header')) resetFrame();
         }}
       >
         {children}
       </section>
-      {edges.map((edge) => (
-        <div
-          key={edge}
-          aria-hidden="true"
-          className={`dialog-resize ${edge}`}
-          onPointerDown={(event) => startSession(event, edge)}
-        />
-      ))}
+      {!popover &&
+        edges.map((edge) => (
+          <div
+            key={edge}
+            aria-hidden="true"
+            className={`dialog-resize ${edge}`}
+            onPointerDown={(event) => startSession(event, edge)}
+          />
+        ))}
     </div>
   );
 }

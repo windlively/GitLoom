@@ -1,11 +1,12 @@
 import { spawn } from 'node:child_process';
-import { lstat, readFile, realpath, rm } from 'node:fs/promises';
+import { lstat, readFile, realpath, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import type {
   Activity,
   BranchComparison,
   Change,
+  Commit,
   CommitDetail,
   FileDiff,
   PushPreview,
@@ -157,8 +158,10 @@ export class GitService {
       this.run(
         [
           'for-each-ref',
-          '--sort=-committerdate',
-          '--format=%(refname)%00%(HEAD)%00%(upstream:short)%00%(subject)',
+          // Sort by ref name: sorting by commit date moved a branch to another row
+          // whenever it was fast-forwarded from its upstream.
+          '--sort=refname',
+          '--format=%(refname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track)%00%(subject)',
           'refs/heads',
           'refs/remotes',
         ],
@@ -452,6 +455,40 @@ export class GitService {
     return { commit: parseLog(log)[0], message: message.trim(), files };
   }
 
+  // History of one branch head: the webview used to derive it from a decorated log
+  // window, which truncated long histories and could mix in remote-tracking commits.
+  async branchLog(name: string, remote: boolean | undefined, limit = 300): Promise<Commit[]> {
+    const branch = await this.existingBranch(name, remote);
+    const raw = await this.run(
+      [
+        'log',
+        '--topo-order',
+        '-z',
+        `--max-count=${Math.min(2000, Math.max(1, limit))}`,
+        `--format=${LOG_FORMAT}`,
+        this.branchRef(branch),
+        '--',
+      ],
+      { silent: true },
+    );
+    return parseLog(raw);
+  }
+
+  async existingFiles(files: string[]): Promise<string[]> {
+    const found = await Promise.all(
+      files.map(async (file) => {
+        try {
+          await lstat(await this.safePath(file));
+          return file;
+        } catch {
+          // Missing, invalid and out-of-repository paths all count as deleted.
+          return '';
+        }
+      }),
+    );
+    return found.filter(Boolean);
+  }
+
   stage(paths: string[]): Promise<string> {
     return this.serialize(async () => {
       const changes = parseStatus(
@@ -589,7 +626,7 @@ export class GitService {
       await this.run(
         [
           'for-each-ref',
-          '--format=%(refname)%00%(HEAD)%00%(upstream:short)%00%(subject)',
+          '--format=%(refname)%00%(HEAD)%00%(upstream:short)%00%(upstream:track)%00%(subject)',
           'refs/heads',
           'refs/remotes',
         ],
@@ -691,16 +728,83 @@ export class GitService {
       return this.run(['branch', `--set-upstream-to=${this.branchRef(target)}`, '--', name]);
     });
   }
-  async compareBranch(name: string, remote?: boolean): Promise<BranchComparison> {
+  private fastForwardError(name: string, error: unknown) {
+    if (error instanceof GitError && /non-fast-forward|not possible to fast-forward/i.test(error.output))
+      return new Error(
+        this.t(
+          'Cannot update "{0}" because the local branch has commits that are not on its upstream. Merge or rebase it manually.',
+          name,
+        ),
+      );
+    return error;
+  }
+  updateBranch(name: string): Promise<string> {
+    return this.serialize(async () => {
+      const branch = await this.existingBranch(name, false);
+      const upstream = (
+        await this.optional(['for-each-ref', '--format=%(upstream)', `refs/heads/${name}`])
+      ).trim();
+      if (!upstream)
+        throw new Error(this.t('Branch "{0}" has no upstream. Set an upstream branch first.', name));
+      // Only the checked-out branch can be fast-forwarded through the working tree.
+      if (branch.current) {
+        if ((await this.run(['status', '--porcelain'], { silent: true })).trim())
+          throw new Error(this.t('Commit or stash local changes before updating the branch.'));
+        try {
+          return await this.run(['pull', '--ff-only'], { network: true });
+        } catch (error) {
+          throw this.fastForwardError(name, error);
+        }
+      }
+      const remote = (await this.optional(['config', '--get', `branch.${name}.remote`])).trim();
+      const source = (await this.optional(['config', '--get', `branch.${name}.merge`])).trim();
+      if (!remote || !source)
+        throw new Error(this.t('Branch "{0}" has no upstream. Set an upstream branch first.', name));
+      try {
+        // Fetching straight into the local ref moves it without checking it out and
+        // fails instead of merging when the branch has diverged from its upstream.
+        await this.run(['fetch', '--prune', remote, `${source}:refs/heads/${name}`], { network: true });
+      } catch (error) {
+        throw this.fastForwardError(name, error);
+      }
+      return this.t('Updated branch "{0}" from {1}.', name, upstream);
+    });
+  }
+  pushBranch(name: string): Promise<string> {
+    return this.serialize(async () => {
+      await this.existingBranch(name, false);
+      const remote = (await this.optional(['config', '--get', `branch.${name}.remote`])).trim();
+      const target = (await this.optional(['config', '--get', `branch.${name}.merge`])).trim();
+      if (remote && target)
+        return this.run(['push', '--', remote, `refs/heads/${name}:${target}`], { network: true });
+      const remotes = (await this.run(['remote'], { silent: true })).trim().split('\n').filter(Boolean);
+      const fallback = remotes.includes('origin') ? 'origin' : remotes.length === 1 ? remotes[0] : undefined;
+      if (!fallback)
+        throw new Error(
+          remotes.length
+            ? this.t('Multiple remotes are configured. Set the upstream for the branch in a terminal first.')
+            : this.t('No remote is configured. Run git remote add origin <URL> first.'),
+        );
+      return this.run(['push', '--set-upstream', '--', fallback, `refs/heads/${name}:refs/heads/${name}`], {
+        network: true,
+      });
+    });
+  }
+  async compareBranch(name: string, remote?: boolean, swap = false): Promise<BranchComparison> {
     const branch = await this.existingBranch(name, remote);
-    const base = (await this.run(['rev-parse', '--verify', this.branchRef(branch)], { silent: true })).trim();
-    const head = (await this.run(['rev-parse', '--verify', 'HEAD'], { silent: true })).trim();
+    const target = (
+      await this.run(['rev-parse', '--verify', this.branchRef(branch)], { silent: true })
+    ).trim();
+    const current = (await this.run(['rev-parse', '--verify', 'HEAD'], { silent: true })).trim();
+    // Counts always describe the current branch first, so the dialog reads the same after swapping.
     const counts = (
-      await this.run(['rev-list', '--left-right', '--count', `${head}...${base}`], { silent: true })
+      await this.run(['rev-list', '--left-right', '--count', `${current}...${target}`], { silent: true })
     )
       .trim()
       .split(/\s+/)
       .map(Number);
+    const base = swap ? current : target;
+    const head = swap ? target : current;
     return {
       branch: name,
       base,
@@ -802,6 +906,68 @@ export class GitService {
       });
     }
     return files;
+  }
+  deleteFiles(paths: string[]): Promise<string> {
+    return this.serialize(async () => {
+      let removed = 0;
+      for (const file of paths) {
+        const absolute = await this.safePath(file);
+        try {
+          await lstat(absolute);
+        } catch (error) {
+          // Rows already deleted from disk stay harmless in a multi-file delete.
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT') continue;
+          throw error;
+        }
+        await rm(absolute, { force: true });
+        removed++;
+      }
+      return this.t('Deleted {0} files from disk.', removed);
+    });
+  }
+  ignorePaths(paths: string[], target: 'gitignore' | 'exclude' = 'gitignore'): Promise<string> {
+    return this.serialize(async () => {
+      const changes = parseStatus(
+        await this.run(['status', '--porcelain=v1', '-z', '--untracked-files=all'], { silent: true }),
+      );
+      const untracked = new Set(
+        changes.filter((change) => change.status === 'untracked').map((change) => change.path),
+      );
+      const known = new Set(changes.map((change) => change.path));
+      const selected: string[] = [];
+      for (const file of paths) {
+        this.validatePath(file);
+        // Files that already disappeared from status are either ignored or committed.
+        if (!known.has(file)) continue;
+        if (!untracked.has(file))
+          throw new Error(this.t('Ignore rules only apply to untracked files. Unstage or untrack it first.'));
+        selected.push(file);
+      }
+      if (!selected.length) return this.t('The selected files are already ignored.');
+      const file = target === 'exclude' ? await this.excludeFile() : path.join(this.root, '.gitignore');
+      const existing = await readFile(file, 'utf8').catch(() => '');
+      const lines = new Set(existing.split('\n').map((line) => line.trim()));
+      const additions: string[] = [];
+      for (const relative of selected) {
+        // Anchor at the repository root so a file name cannot match a sibling directory.
+        const pattern = `/${relative.replace(/ $/, '\\ ')}`;
+        if (lines.has(pattern)) continue;
+        lines.add(pattern);
+        additions.push(pattern);
+      }
+      if (!additions.length) return this.t('The selected files are already ignored.');
+      const separator = existing && !existing.endsWith('\n') ? '\n' : '';
+      await writeFile(file, `${existing}${separator}${additions.join('\n')}\n`, 'utf8');
+      return this.t(
+        'Added {0} paths to {1}.',
+        additions.length,
+        target === 'exclude' ? '.git/info/exclude' : '.gitignore',
+      );
+    });
+  }
+  private async excludeFile(): Promise<string> {
+    const value = (await this.optional(['rev-parse', '--git-path', 'info/exclude'])).trim();
+    return value ? path.resolve(this.root, value) : path.join(this.root, '.git', 'info', 'exclude');
   }
   discard(paths: string[]): Promise<string> {
     return this.serialize(async () => {

@@ -213,7 +213,13 @@ export async function run() {
       )?.input as vscode.TabInputTextDiff;
     assert.ok(secondDiff);
     assert.equal((await vscode.workspace.openTextDocument(secondDiff.modified)).getText(), 'new file\n');
-    assert.equal((await vscode.workspace.openTextDocument(firstDiff.original)).getText(), 'edited\n');
+    assert.equal(
+      vscode.window.tabGroups.all
+        .flatMap((group) => group.tabs)
+        .filter((tab) => tab.input instanceof vscode.TabInputTextDiff).length,
+      1,
+      'opening another file reuses the diff preview tab',
+    );
     await rm(path.join(root, 'tracked.txt'));
     reply = await rpc('openDiff', { path: 'tracked.txt' });
     assert.equal(reply.error, undefined);
@@ -241,8 +247,15 @@ export async function run() {
       )?.input as vscode.TabInputTextDiff;
     assert.ok(linkDiff);
     assert.equal((await vscode.workspace.openTextDocument(linkDiff.modified)).getText(), outside);
+    await writeFile(path.join(root, 'ignored.txt'), 'ignore me\n');
+    reply = await rpc('ignorePaths', { paths: ['ignored.txt'] });
+    assert.equal(reply.error, undefined);
+    assert.match(reply.result, /\.gitignore/);
+    assert.equal(await readFile(path.join(root, '.gitignore'), 'utf8'), '/ignored.txt\n');
+    state = (await rpc('snapshot', {})).result;
+    assert.ok(!state.changes.some((change) => change.path === 'ignored.txt'), 'ignored file leaves the change list');
     console.log(
-      'HOST PASS: native bottom panel, source editor and terminal co-existence, no Git editor tab, hide/reopen retains view, commands, real RPC snapshot/diff/selected commit, push failure, changelists, repository boundary, native diff providers.',
+      'HOST PASS: native bottom panel, source editor and terminal co-existence, no Git editor tab, hide/reopen retains view, commands, real RPC snapshot/diff/selected commit, push failure, changelists, repository boundary, ignore rules, native diff providers and preview-tab reuse.',
     );
   } finally {
     terminal.dispose();

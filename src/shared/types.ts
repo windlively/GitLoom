@@ -12,6 +12,10 @@ export interface Branch {
   current: boolean;
   remote: boolean;
   upstream: string;
+  // Commits the upstream does not have yet, counted from the last fetch.
+  ahead: number;
+  // Commits the upstream has but this branch does not.
+  behind: number;
   subject: string;
 }
 export interface Commit {
@@ -100,12 +104,20 @@ export interface Activity {
 export interface Requests {
   snapshot: { params: { repository?: string }; result: Snapshot };
   diff: { params: { path: string; commit?: string; stash?: string }; result: FileDiff };
+  existingFiles: { params: { paths: string[] }; result: string[] };
   commitDetail: { params: { hash: string }; result: CommitDetail };
+  // History reachable from one branch head, so selecting a local branch never shows
+  // commits that only exist on its remote-tracking branch.
+  branchLog: { params: { branch: string; remote?: boolean }; result: Commit[] };
   commit: {
     params: { paths: string[]; message: string; push?: boolean };
     result: { output: string; pushError?: string };
   };
   stage: { params: { paths: string[] }; result: string };
+  deleteFiles: { params: { paths: string[] }; result: string };
+  ignorePaths: { params: { paths: string[]; target?: 'gitignore' | 'exclude' }; result: string };
+  copyPaths: { params: { paths: string[]; absolute?: boolean }; result: void };
+  revealPath: { params: { path: string }; result: void };
   fetch: { params: Record<string, never>; result: string };
   pull: { params: Record<string, never>; result: string };
   push: { params: Record<string, never>; result: string };
@@ -117,9 +129,17 @@ export interface Requests {
   rebase: { params: { branch: string; remote?: boolean }; result: string };
   renameBranch: { params: { branch: string; name: string }; result: string };
   setUpstream: { params: { branch: string; upstream?: string }; result: string };
+  updateBranch: { params: { branch: string }; result: string };
+  pushBranch: { params: { branch: string }; result: string };
   copyBranch: { params: { branch: string; remote?: boolean }; result: void };
-  compareBranch: { params: { branch: string; remote?: boolean }; result: BranchComparison };
-  openBranchDiff: { params: { path: string; base: string; head: string }; result: void };
+  compareBranch: {
+    params: { branch: string; remote?: boolean; swap?: boolean };
+    result: BranchComparison;
+  };
+  openBranchDiff: {
+    params: { path: string; base: string; head: string; keepFocus?: boolean };
+    result: void;
+  };
   stash: { params: { message: string }; result: string };
   stashApply: { params: { ref: string; pop?: boolean }; result: string };
   stashDrop: { params: { ref: string }; result: string };
@@ -128,7 +148,10 @@ export interface Requests {
   markResolved: { params: { path: string }; result: string };
   resolve: { params: { path: string }; result: void };
   openFile: { params: { path: string }; result: void };
-  openDiff: { params: { path: string; commit?: string; stash?: string }; result: void };
+  openDiff: {
+    params: { path: string; commit?: string; stash?: string; keepFocus?: boolean };
+    result: void;
+  };
   setFileLayout: { params: { layout: FileLayout }; result: void };
   pickRepository: { params: Record<string, never>; result: void };
   changelist: {

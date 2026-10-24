@@ -6,6 +6,8 @@ import {
   type KeyboardEvent as ReactKeyboardEvent,
 } from 'react';
 import type { Branch } from '../../src/shared/types';
+import { currentFirst } from './branch-groups';
+import { BranchSync } from './branch-sync';
 import { ChevronRight, GitBranch, Plus, Search } from './icons';
 import { t } from './i18n';
 
@@ -28,7 +30,7 @@ export function BranchDropdown({
   onBranch: (branch: Branch, x: number, y: number) => void;
   onBranchHover: (branch: Branch, x: number, y: number) => void;
   onDismissSubmenu: () => void;
-  onNewBranch: () => void;
+  onNewBranch: (anchor?: { x: number; y: number; width: number; height: number }) => void;
   newBranchDisabled?: boolean;
   close: () => void;
 }) {
@@ -96,7 +98,11 @@ export function BranchDropdown({
 
   const matches = branches.filter((branch) => branch.name.toLowerCase().includes(query.toLowerCase()));
   const groups = [
-    { label: t('Local branches'), items: matches.filter((branch) => !branch.remote) },
+    {
+      label: t('Local branches'),
+      // The checked-out branch always comes first; the rest keeps the host's name order.
+      items: currentFirst(matches.filter((branch) => !branch.remote)),
+    },
     { label: t('Remote branches'), items: matches.filter((branch) => branch.remote) },
   ];
   const isActive = (branch: Branch) =>
@@ -169,7 +175,7 @@ export function BranchDropdown({
                   }}
                 >
                   <button
-                    className={`branch-dropdown-name${isActive(branch) ? ' active' : ''}`}
+                    className={`branch-dropdown-name${isActive(branch) ? ' active' : ''}${branch.current ? ' current' : ''}`}
                     title={`${branch.name}\n${branch.subject}`}
                     onPointerEnter={(event) => scheduleHover(branch, event.currentTarget)}
                     onPointerLeave={cancelHover}
@@ -179,11 +185,12 @@ export function BranchDropdown({
                       onBranch(branch, rect.right + 2, rect.top);
                     }}
                   >
-                    <GitBranch size={14} />
+                    <GitBranch size={14} className={branch.current ? 'current-branch-icon' : undefined} />
                     <span className="branch-dropdown-text">
                       <strong>{branch.name}</strong>
                       <small>{branch.upstream || branch.subject}</small>
                     </span>
+                    <BranchSync branch={branch} />
                     {branch.current && <span className="tag">{t('Current')}</span>}
                     <ChevronRight size={13} />
                   </button>
@@ -199,7 +206,7 @@ export function BranchDropdown({
           className="button"
           disabled={newBranchDisabled}
           title={newBranchDisabled ? t('Finish the current Git operation first') : undefined}
-          onClick={onNewBranch}
+          onClick={(event) => onNewBranch(event.currentTarget.getBoundingClientRect())}
         >
           <Plus size={14} />
           {t('New branch')}

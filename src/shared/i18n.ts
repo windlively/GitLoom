@@ -34,6 +34,15 @@ export const zhCN: Record<string, string> = {
   'Resolve all conflicts first.': '请先解决所有冲突。',
   'The current branch has no upstream. Push and set an upstream first.':
     '当前分支没有上游分支，请先推送并设置上游。',
+  'Branch "{0}" has no upstream. Set an upstream branch first.':
+    '分支「{0}」没有上游分支，请先设置上游分支。',
+  'Commit or stash local changes before updating the branch.': '请先提交或 Stash 本地更改，再更新分支。',
+  'Cannot update "{0}" because the local branch has commits that are not on its upstream. Merge or rebase it manually.':
+    '无法更新「{0}」：本地分支包含上游没有的提交，请先手动合并或 Rebase。',
+  'Updated branch "{0}" from {1}.': '已将分支「{0}」从 {1} 更新。',
+  'Pushed branch "{0}" to {1}.': '已将分支「{0}」推送到 {1}。',
+  'Multiple remotes are configured. Set the upstream for the branch in a terminal first.':
+    '存在多个远程仓库，请先在终端设置该分支的上游。',
   'Commit or stash local changes before updating the project.': '请先提交或 Stash 本地更改，再更新项目。',
   'Multiple remotes are configured. Set the upstream for the current branch in a terminal first.':
     '存在多个远程仓库，请先在终端设置当前分支的上游。',
@@ -73,6 +82,7 @@ export const zhCN: Record<string, string> = {
     '该目录不是 Git 仓库。请先运行 git init 或选择已有仓库。',
   'Open a Git repository first.': '请先打开一个 Git 仓库。',
   'Some files could not be saved. Save them and try again.': '部分文件未能保存，请保存文件后重试。',
+  'The file no longer exists in the working tree.': '该文件在工作区中已不存在。',
   'Delete the {0} branch "{1}"?': '删除{0}分支「{1}」？',
   'Delete Branch': '删除分支',
   'This deletes the branch on the remote server and affects collaborators. The deletion is rejected if the remote branch has changed.':
@@ -97,6 +107,16 @@ export const zhCN: Record<string, string> = {
   '{0}\n\nThis resets to HEAD, including staged changes; untracked files will be deleted. This cannot be undone.':
     '{0}\n\n将还原到 HEAD，包含暂存区更改；未跟踪文件会被删除。此操作无法撤销。',
   'Discard canceled.': '已取消回滚。',
+  'Delete {0} files from disk?': '从磁盘删除 {0} 个文件？',
+  'Delete Files': '删除文件',
+  '{0}\n\nFiles are removed from the working tree. Tracked files stay in Git history and show up as deleted changes. This cannot be undone.':
+    '{0}\n\n文件将从工作区移除，已跟踪文件仍保留在 Git 历史中并显示为删除更改。此操作无法撤销。',
+  'Deletion canceled.': '已取消删除。',
+  'Deleted {0} files from disk.': '已从磁盘删除 {0} 个文件。',
+  'Ignore rules only apply to untracked files. Unstage or untrack it first.':
+    '忽略规则只对未跟踪文件生效，请先取消暂存或取消跟踪。',
+  'The selected files are already ignored.': '所选文件已被忽略。',
+  'Added {0} paths to {1}.': '已将 {0} 个路径添加到 {1}。',
   'Revert the changes in commit {0}?': '还原提交 {0} 的改动？',
   'Create Revert Commit': '创建还原提交',
   'This creates a new inverse commit and preserves the original history.':
@@ -157,6 +177,8 @@ export const zhCN: Record<string, string> = {
     '差异计算超时，请使用 VS Code 原生差异编辑器。',
   'Local branches': '本地分支',
   'Remote branches': '远程分支',
+  '{0} commits to push': '{0} 个提交待推送',
+  '{0} commits to pull': '{0} 个提交待拉取',
   'Select branch': '选择分支',
   'Find branch': '查找分支',
   'Find branch…': '查找分支…',
@@ -172,6 +194,16 @@ export const zhCN: Record<string, string> = {
   'Commit & Push': '提交并推送',
   Commit: '提交',
   'Add to Git': '添加到 Git',
+  'Show Diff': '显示差异',
+  'Open File': '打开文件',
+  'Copy Path': '复制路径',
+  'Copy Relative Path': '复制相对路径',
+  'Rollback Changes…': '回滚更改…',
+  'Delete Files…': '删除文件…',
+  'Add to .gitignore': '添加到 .gitignore',
+  'Add to .git/info/exclude': '添加到 .git/info/exclude',
+  'Move to Another Changelist…': '移到其他更改列表…',
+  'Reveal in File Manager': '在文件管理器中显示',
   'Switch Branch': '切换分支',
   'Merge Branch': '合并分支',
   'Update Project': '更新项目',
@@ -186,6 +218,8 @@ export const zhCN: Record<string, string> = {
   'Mark Resolved': '标记已解决',
   'Open Branch Comparison': '打开分支比较',
   'Set Upstream': '设置上游分支',
+  'Update Branch': '更新分支',
+  'Push Branch': '推送分支',
   'Move Files': '移动文件',
   'Create Branch': '创建分支',
   'Rename Branch': '重命名分支',
@@ -197,6 +231,8 @@ export const zhCN: Record<string, string> = {
   Push: '推送',
 
   'Merge Conflicts': '合并冲突',
+  'Merge commit': '合并提交',
+  Merge: '合并',
   'Default Changelist': '默认更改列表',
   'Unversioned Files': '未版本化的文件',
   'Add {0} files to Git': '添加到 Git（{0} 个文件）',
@@ -217,6 +253,12 @@ export const zhCN: Record<string, string> = {
   'Set upstream branch…': '设置上游分支…',
   'Pull and update current branch': '拉取并更新当前分支',
   'Push current branch…': '推送当前分支…',
+  'Update branch from its upstream (fast-forward only)': '从上游更新分支（仅快进）',
+  'Push this branch to its remote…': '推送此分支到远程…',
+  'Push branch "{0}" to its remote?': '将分支「{0}」推送到远程？',
+  'If the remote branch has commits that are not in the local branch, the push is rejected and nothing changes.':
+    '如果远程分支包含本地没有的提交，推送会被拒绝，不会产生任何修改。',
+  'Push canceled.': '已取消推送。',
   'Copy branch name': '复制分支名称',
   'Delete remote branch…': '删除远程分支…',
   'Delete branch…': '删除分支…',
@@ -241,6 +283,7 @@ export const zhCN: Record<string, string> = {
   History: '历史',
   'Interactive preview · Sample repository': '交互预览 · 示例仓库',
   'Fetch the latest information from all remotes': '获取所有远程仓库的最新信息',
+  'Fetch all remote branches without changing local branches': '获取所有远程分支更新，不改动本地分支',
   Fetch: '获取',
   Pull: '拉取',
   'Refresh workbench': '刷新工作台',
@@ -286,6 +329,8 @@ export const zhCN: Record<string, string> = {
   Default: '默认',
   'Delete changelist {0}': '删除更改列表 {0}',
   'Select file {0}': '选择文件 {0}',
+  'Open file {0}': '打开文件 {0}',
+  'File no longer exists': '文件已不存在',
   'All changes are staged': '修改已全部暂存',
   'Some changes are staged; the working tree has unstaged changes': '已暂存部分修改，工作区还有未暂存修改',
   'Shift / {0} click to select multiple': 'Shift / {0} 点击可多选',
@@ -363,6 +408,7 @@ export const zhCN: Record<string, string> = {
   'A Familiar Git Workflow': '熟悉的 Git 工作方式',
   'Close dialog': '关闭对话框',
   'Comparing branches…': '正在比较分支…',
+  'Swap compared branches': '交换对比分支',
   'Current branch has {0} unique commits, the other branch has {1}; {2} files differ.':
     '当前分支独有 {0} 个提交，对方独有 {1} 个提交；{2} 个文件不同。',
   'The two branches have identical file contents': '两个分支的文件内容一致',
@@ -402,6 +448,7 @@ export const zhCN: Record<string, string> = {
   'Commits to push: {0}. {1}': '将推送 {0} 个提交到远程。{1}',
   'The first push will set the upstream.': '首次推送将设置上游。',
   'Reading commits to push…': '正在读取待推送的提交…',
+  'Reading branch history…': '正在读取分支历史…',
   'Only the latest 100 commits are previewed; {0} total.': '仅预览最近 100 个提交，共 {0} 个。',
   'The local branch is already up to date.': '本地分支已是最新状态。',
   'The branch is {0} commits behind its upstream. Pull before pushing.':

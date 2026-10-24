@@ -41,8 +41,10 @@ The UI follows VS Code's native component style, inheriting panel, list, input, 
 
 - Files are grouped by change list, with untracked files and merge conflicts shown separately.
 - Changed files and commit detail files are shown as a directory tree by default; folders collapse level by level, single-child chains such as `webview/src` are compacted into one row with a file count, and the toolbar grouping button or the `gitWorkbench.fileLayout` setting switches to a flat list with full paths.
-- Check files or an entire change list, then click a file to review its side-by-side diff.
-- File rows support IntelliJ IDEA-style selection: click to select, `Shift` to select a range, and `Cmd` / `Ctrl` to toggle multiple selections. Right-click a multi-selection to **Add to Git** (stage to the index) or **Commit Selected Files** directly. Row selection and commit checkboxes are independent.
+- Check files or an entire changelist, then click a file to review its side-by-side diff. The button on the right of each file row opens the current working-tree file; when the file no longer exists, that slot shows "Deleted".
+- Diffs opened in VS Code use preview tabs, matching native Git: reviewing one file after another reuses the same diff window instead of piling up tabs.
+- File rows support IntelliJ IDEA-style selection: click to select, `Shift` to select a range, and `Cmd` / `Ctrl` to toggle multiple selections. File names are colored by status using VS Code's Git decoration theme colors (added/untracked green, deleted red, modified amber in the default themes; other themes may differ), and selected rows follow the selection foreground. Row selection and commit checkboxes are independent.
+- Right-click a file or the current multi-selection for the actions menu: show the diff, open the file, copy the path or relative path, **Add to Git**, **Rollback Changes**, **Delete Files**, **Add to .gitignore** or **.git/info/exclude**, move to another changelist, **Commit Selected Files**, and reveal in the file manager. Delete and rollback ask for native confirmation first; ignore rules only accept untracked files and never duplicate existing lines.
 - Staged and partially staged files display status badges; staging affects only the selected files and leaves other changes untouched.
 - The diff supports syntax highlighting, added/removed lines, line numbers, context filtering, unified view, synchronized vertical scrolling, and independent horizontal scrolling.
 - Enter a message and click **Commit** or **Commit & Push**. Open files are saved before committing.
@@ -52,13 +54,14 @@ The UI follows VS Code's native component style, inheriting panel, list, input, 
 
 ### Branches and commit history
 
-- Local and remote branches appear on the left. Click to filter history, double-click to check out, or right-click / use the ellipsis to open the branch menu. The top branch dropdown supports search and scrolls inside the list when the panel is short. Hovering a branch row reveals its actions menu while the first-level list stays visible; right-clicking also opens it.
-- The branch pane is flat by default; use the grouping button in its header to collapse branches by namespace prefix. `feature/ui/login` becomes a hierarchical `feature` → `ui` → `login` directory, with branch counts at each level and independently collapsible folders. The setting is remembered; remote branch grouping ignores remote-name prefixes such as `origin`, while search still matches the full branch name.
-- The menu offers checkout, create and switch from a selected branch, compare with current, view history, merge into current, rebase current onto the selected branch, rename, set upstream, copy name, and delete. The current branch additionally offers pull and push.
-- Branch comparison shows commits unique to each side and changed files; click a file to review it in VS Code's native diff.
+- Local and remote branches appear on the left. Click a branch to see its own history, starting at that branch head — a local branch never shows commits that only exist on its remote-tracking branch; double-click to check out, or right-click / use the ellipsis to open the branch menu. The top branch dropdown supports search and scrolls inside the list when the panel is short. Hovering a branch row reveals its actions menu while the first-level list stays visible; right-clicking also opens it. The fetch button in the branch header refreshes every remote branch (`git fetch --all --prune`) without changing any local branch.
+- Local branches with an upstream show their difference from it in both the branch pane and the branch dropdown: `↑N` counts commits that are not pushed yet and `↓N` counts commits that are not pulled yet, matching IDEA's branch popup. The numbers come from `%(upstream:track)` in `git for-each-ref`, are measured against the remote-tracking branch from the last fetch, and never trigger network access. Branches in sync show no marker.
+- The branch pane is flat by default: the checked-out branch is pinned first and marked with a check icon, bold name and its own branch color, the rest is sorted by branch name so updating or fast-forwarding a branch never moves its row; use the grouping button in its header to collapse branches by namespace prefix. `feature/ui/login` becomes a hierarchical `feature` → `ui` → `login` directory, with branch counts at each level and independently collapsible folders. The setting is remembered; remote branch grouping ignores remote-name prefixes such as `origin`, while search still matches the full branch name.
+- The menu offers checkout, create and switch from a selected branch, compare with current, view history, fast-forward a non-current branch from its upstream, push a selected local branch, merge into current, rebase current onto the selected branch, rename, set upstream, copy name, and delete. The current branch additionally offers pull and push. Updating or pushing another branch never checks it out; if it has diverged from its upstream or the remote has new commits, the operation is rejected and both sides stay unchanged.
+- Branch comparison shows commits unique to each side and changed files; files can be grouped by directory and collapsed, and the direction button swaps the compared branches. Click a file to review it in VS Code's native diff.
 - Create branches from the current HEAD or a selected branch; checking out a remote branch creates a local tracking branch or reuses an existing local branch that already tracks it.
 - Rebase requires a clean working tree; conflicts can be continued or aborted. Renaming changes only the local name and keeps the existing upstream setting.
-- The commit graph is drawn from real parent-child relationships in topological order and supports searching messages, authors, and hashes.
+- The commit graph is drawn from real parent-child relationships in topological order and supports searching messages, authors, and hashes. Merge commits carry a small "Merge" label before their subject in the list and in the details title.
 - Select a commit to view its author, message, and file list; click a file to see its diff against the first parent.
 - Right-click a commit to cherry-pick, revert, or hard reset the current branch; a hard reset first shows a native confirmation and discards tracked local changes.
 - Local branches are deleted with Git's safe delete, which only allows merged, non-current branches. Deleting a remote branch shows a native confirmation and verifies that the remote commit hasn't changed.
@@ -88,7 +91,13 @@ The UI follows VS Code's native component style, inheriting panel, list, input, 
 | Commit (workbench)        | `Cmd+Enter`       | `Ctrl+Enter`       |
 | Commit & Push (workbench) | `Cmd+Shift+Enter` | `Ctrl+Shift+Enter` |
 | Refresh (workbench)       | `Cmd+R`           | `Ctrl+R`           |
+| Move through file lists   | `↑` / `↓`         | `↑` / `↓`          |
+| Jump to first/last file   | `Home` / `End`    | `Home` / `End`     |
+| Move through commits      | `↑` / `↓`         | `↑` / `↓`          |
+| Jump to first/last commit | `Home` / `End`    | `Home` / `End`     |
 | Close dialog              | `Esc`             | `Esc`              |
+
+When a file list (changes, commit details, Stash, branch comparison) has focus, `↑` / `↓` move the selection one file at a time and `Home` / `End` jump to the first or last file; long lists scroll row by row instead of jumping. Arrows only move the selection and never open a diff (which would hand focus to the editor); press `Enter` or click to open one. The keys also work from checkboxes and folder rows, and regaining panel focus or pressing an arrow while the panel is unfocused continues from the selected file, including after clicking one with the mouse. The commit history works the same way: `↑` / `↓` / `Home` / `End` move the selected commit and load its details, while arrows go back to moving files once a row in the commit detail file list has focus.
 
 ## Settings
 
@@ -123,7 +132,7 @@ npm run package
 
 Host tests default to macOS `/Applications/Visual Studio Code.app/Contents/MacOS/Code`. Set `VSCODE_EXECUTABLE_PATH` to use a different installation. Tests run in an isolated temporary repository and VS Code configuration directory, not your personal extensions directory.
 
-`npm test` uses a real temporary repository and a local bare remote to verify selective commits, staging of selected files, preservation of staged content in unselected files, special file names, renames, branch grouping, branch creation from a specified start point, branch comparison, rebase, upstream settings, remote checkout and deletion, merges, conflict continue/abort, stash, fetch/pull/push, failing hooks, path boundaries, and size limits. Host tests cover activation, commands, the webview, message handling, changelist storage, push failure after commit, and native diff.
+`npm test` uses a real temporary repository and a local bare remote to verify selective commits, staging of selected files, preservation of staged content in unselected files, special file names, renames, branch grouping, branch creation from a specified start point, branch comparison and direction swapping, fast-forward updates and pushes of non-current branches, rebase, upstream settings, remote checkout and deletion, merges, conflict continue/abort, stash, fetch/pull/push, failing hooks, path boundaries, and size limits. Host tests cover activation, commands, the webview, message handling, changelist storage, push failure after commit, and native diff.
 
 ## Architecture
 

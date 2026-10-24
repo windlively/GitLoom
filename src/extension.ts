@@ -19,9 +19,15 @@ import type {
 const METHODS: Method[] = [
   'snapshot',
   'diff',
+  'existingFiles',
   'commitDetail',
+  'branchLog',
   'commit',
   'stage',
+  'deleteFiles',
+  'ignorePaths',
+  'copyPaths',
+  'revealPath',
   'fetch',
   'pull',
   'push',
@@ -33,6 +39,8 @@ const METHODS: Method[] = [
   'rebase',
   'renameBranch',
   'setUpstream',
+  'updateBranch',
+  'pushBranch',
   'copyBranch',
   'compareBranch',
   'openBranchDiff',
@@ -57,7 +65,9 @@ const METHODS: Method[] = [
 const READ_ONLY = new Set<Method>([
   'snapshot',
   'diff',
+  'existingFiles',
   'commitDetail',
+  'branchLog',
   'outgoing',
   'copyBranch',
   'compareBranch',
@@ -68,6 +78,8 @@ const READ_ONLY = new Set<Method>([
   'setFileLayout',
   'resolve',
   'pickRepository',
+  'copyPaths',
+  'revealPath',
 ]);
 export const WORKBENCH_VIEW_ID = 'gitWorkbench.workbench';
 // Windows kept open across an extension update can lack the generated view focus command.
@@ -414,10 +426,7 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         updatedAt: Date.now(),
       };
     const git = this.service;
-    const limit = Math.min(
-      2000,
-      Math.max(50, vscode.workspace.getConfiguration('gitWorkbench').get<number>('historyLimit', 300)),
-    );
+    const limit = this.historyLimit();
     const state = await git.snapshot(limit);
     return {
       ...state,
@@ -427,6 +436,12 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       fileLayout,
       changelists: this.changelists(git.root),
     };
+  }
+  private historyLimit() {
+    return Math.min(
+      2000,
+      Math.max(50, vscode.workspace.getConfiguration('gitWorkbench').get<number>('historyLimit', 300)),
+    );
   }
   private async refresh(force = true) {
     if (!this.panel) return;
@@ -568,6 +583,14 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         });
       case 'commitDetail':
         return git.commitDetail(string('hash'));
+      case 'branchLog':
+        return git.branchLog(
+          string('branch'),
+          typeof params.remote === 'boolean' ? params.remote : undefined,
+          this.historyLimit(),
+        );
+      case 'existingFiles':
+        return git.existingFiles(paths());
       case 'commit': {
         if (!(await vscode.workspace.saveAll(false)))
           throw new Error(this.t('Some files could not be saved. Save them and try again.'));
@@ -584,6 +607,35 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       }
       case 'stage':
         return git.stage(paths());
+      case 'deleteFiles': {
+        const selected = paths();
+        if (
+          await this.confirm(
+            this.t('Delete {0} files from disk?', selected.length),
+            this.t('Delete Files'),
+            this.t(
+              '{0}\n\nFiles are removed from the working tree. Tracked files stay in Git history and show up as deleted changes. This cannot be undone.',
+              selected.slice(0, 8).join('\n'),
+            ),
+          )
+        )
+          return git.deleteFiles(selected);
+        throw new Error(this.t('Deletion canceled.'));
+      }
+      case 'ignorePaths':
+        return git.ignorePaths(paths(), params.target === 'exclude' ? 'exclude' : 'gitignore');
+      case 'copyPaths': {
+        const selected = paths();
+        const list = params.absolute === true ? selected.map((file) => path.join(git.root, file)) : selected;
+        await vscode.env.clipboard.writeText(list.join('\n'));
+        return;
+      }
+      case 'revealPath':
+        await vscode.commands.executeCommand(
+          'revealFileInOS',
+          vscode.Uri.file(await git.safePath(string('path'))),
+        );
+        return;
       case 'fetch':
         return git.fetch();
       case 'pull':
@@ -637,13 +689,29 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         return git.renameBranch(string('branch'), string('name'));
       case 'setUpstream':
         return git.setUpstream(string('branch'), string('upstream', true) || undefined);
+      case 'updateBranch':
+        return git.updateBranch(string('branch'));
+      case 'pushBranch': {
+        const name = string('branch');
+        if (
+          await this.confirm(
+            this.t('Push branch "{0}" to its remote?', name),
+            this.t('Push Branch'),
+            this.t(
+              'If the remote branch has commits that are not in the local branch, the push is rejected and nothing changes.',
+            ),
+          )
+        )
+          return git.pushBranch(name);
+        throw new Error(this.t('Push canceled.'));
+      }
       case 'copyBranch': {
         const branch = await git.existingBranch(string('branch'), params.remote === true);
         await vscode.env.clipboard.writeText(branch.name);
         return;
       }
       case 'compareBranch':
-        return git.compareBranch(string('branch'), params.remote === true);
+        return git.compareBranch(string('branch'), params.remote === true, params.swap === true);
       case 'openBranchDiff': {
         const diff = await git.branchDiff(string('path'), string('base'), string('head'));
         if (diff.binary || diff.truncated)
@@ -668,8 +736,9 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
           before,
           after,
           `${path.basename(diff.path)} (${diff.beforeLabel} ↔ ${diff.afterLabel})`,
-          { preview: false },
+          { preview: true, preserveFocus: true },
         );
+        if (params.keepFocus === true) this.refocusWorkbench();
         return;
       }
       case 'stash': {
@@ -716,12 +785,24 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
         );
         return;
       case 'openFile':
-        await vscode.window.showTextDocument(vscode.Uri.file(await git.safePath(string('path'), true)), {
-          preview: true,
-        });
+        try {
+          await vscode.window.showTextDocument(vscode.Uri.file(await git.safePath(string('path'), true)), {
+            preview: true,
+          });
+        } catch (error) {
+          if ((error as NodeJS.ErrnoException).code === 'ENOENT')
+            throw new Error(this.t('The file no longer exists in the working tree.'));
+          throw error;
+        }
         return;
       case 'openDiff':
-        return this.openDiff(git, string('path'), string('commit', true), string('stash', true));
+        return this.openDiff(
+          git,
+          string('path'),
+          string('commit', true),
+          string('stash', true),
+          params.keepFocus === true,
+        );
       case 'cherryPick':
         return git.cherryPick(string('hash'));
       case 'revert': {
@@ -797,11 +878,12 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       .showWarningMessage(message, { modal: true, detail }, button)
       .then((choice) => choice === button);
   }
-  private async openDiff(git: GitService, file: string, commit?: string, stash?: string) {
+  private async openDiff(git: GitService, file: string, commit?: string, stash?: string, keepFocus = false) {
     const diff = await git.diff(file, { commit: commit || undefined, stash: stash || undefined, full: true });
     if (diff.binary) {
       if (!commit && !stash) {
         await vscode.commands.executeCommand('git.openChange', vscode.Uri.file(await git.safePath(file)));
+        if (keepFocus) this.refocusWorkbench();
         return;
       }
       throw new Error(
@@ -832,7 +914,32 @@ export class Workbench implements vscode.WebviewViewProvider, vscode.Disposable 
       before,
       after,
       `${path.basename(file)} (${diff.beforeLabel} ↔ ${diff.afterLabel})`,
-      { preview: false },
+      { preview: true, preserveFocus: true },
     );
+    if (keepFocus) this.refocusWorkbench();
+  }
+
+  // Opening a diff can move keyboard focus to the editor; give it back so list navigation keeps working.
+  private refocusWorkbench() {
+    setTimeout(() => {
+      void (async () => {
+        let commands: string[] = [];
+        try {
+          commands = await vscode.commands.getCommands(true);
+        } catch {
+          // Fall back to the view when the command registry is unavailable.
+        }
+        const focus = `${WORKBENCH_VIEW_ID}.focus`;
+        if (commands.includes(focus)) {
+          try {
+            await vscode.commands.executeCommand(focus);
+            return;
+          } catch {
+            // Fall through to the view itself when the focus command is stale.
+          }
+        }
+        if (this.panel?.visible) this.panel.show(false);
+      })();
+    }, 0);
   }
 }

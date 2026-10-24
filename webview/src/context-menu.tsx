@@ -1,13 +1,15 @@
 import { useLayoutEffect, useRef, useState, type ReactNode } from 'react';
 import { t } from './i18n';
 
+export type AnchorRect = { x: number; y: number; width: number; height: number };
 export interface MenuAction {
   label: string;
   icon?: ReactNode;
   disabled?: boolean;
   danger?: boolean;
   separator?: boolean;
-  run: () => void;
+  // The clicked item's rectangle, so a dialog opened from the menu lands next to it.
+  run: (anchor?: AnchorRect) => void;
 }
 export function ContextMenu({
   x,
@@ -91,10 +93,11 @@ export function ContextMenu({
             role="menuitem"
             disabled={action.disabled}
             className={action.danger ? 'danger' : ''}
-            onClick={() => {
+            onClick={(event) => {
+              const anchor = event.currentTarget.getBoundingClientRect();
               close();
               onSelect?.();
-              action.run();
+              action.run(anchor);
             }}
           >
             {action.icon || <span className="menu-icon-placeholder" />}

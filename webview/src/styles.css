@@ -115,6 +115,18 @@ input[type='checkbox']:disabled {
 input::placeholder,
 textarea::placeholder {
   color: var(--vscode-input-placeholderForeground, #989898);
+  /* Themes often pick a placeholder colour close to the typed text; the extra
+     fade keeps hints from reading like content that is already there. */
+  opacity: 0.65;
+}
+/* High contrast themes rely on full-strength text for readability. */
+body.vscode-high-contrast input::placeholder,
+body.vscode-high-contrast textarea::placeholder,
+body.vscode-high-contrast-light input::placeholder,
+body.vscode-high-contrast-light textarea::placeholder,
+body.vscode-high-contrast .search-box .codicon,
+body.vscode-high-contrast-light .search-box .codicon {
+  opacity: 1;
 }
 ::selection {
   background: var(--vscode-editor-selectionBackground, #264f78);
@@ -447,6 +459,11 @@ body.vscode-high-contrast-light .select-popup {
   font-size: 11px;
   font-weight: 600;
 }
+.branch-heading-actions {
+  display: flex;
+  align-items: center;
+  gap: 2px;
+}
 .search-box {
   display: flex;
   align-items: center;
@@ -464,6 +481,8 @@ body.vscode-high-contrast-light .select-popup {
 }
 .search-box .codicon {
   color: var(--vscode-input-placeholderForeground, var(--muted));
+  /* Keep the leading icon at the same visual weight as the hint text. */
+  opacity: 0.7;
 }
 .search-box input {
   min-width: 0;
@@ -539,6 +558,9 @@ body.vscode-high-contrast-light .select-popup {
 .branch-row.current .branch-name {
   color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--fg));
 }
+.branch-row.current .branch-label {
+  font-weight: 600;
+}
 .branch-name {
   display: flex;
   align-items: center;
@@ -549,11 +571,21 @@ body.vscode-high-contrast-light .select-popup {
   text-align: left;
   padding: 0 4px;
 }
-.branch-name > span:not(.current-dot) {
+.branch-name > .branch-label {
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
   font-size: 12px;
+}
+/* The checked-out branch sits first and is marked with a check instead of a dot. */
+.current-branch-icon {
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--fg));
+}
+.current-check {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  color: var(--vscode-gitDecoration-modifiedResourceForeground, var(--fg));
 }
 .branch-row .icon-button {
   width: 22px;
@@ -563,7 +595,6 @@ body.vscode-high-contrast-light .select-popup {
 .branch-row:focus-within .icon-button {
   visibility: visible;
 }
-.current-dot,
 .online-dot,
 .error-dot {
   width: 5px;
@@ -572,11 +603,20 @@ body.vscode-high-contrast-light .select-popup {
   flex-shrink: 0;
   background: var(--vscode-testing-iconPassed, #73c991);
 }
-.current-dot {
-  margin-left: auto;
-  background: currentColor;
-  width: 4px;
-  height: 4px;
+/* IDEA-style upstream counters: ↑ commits to push, ↓ commits to pull. */
+.branch-sync {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  flex-shrink: 0;
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+}
+.branch-sync-ahead {
+  color: var(--vscode-gitDecoration-untrackedResourceForeground, #73c991);
+}
+.branch-sync-behind {
+  color: var(--vscode-charts-blue, #3794ff);
 }
 .error-dot {
   background: var(--vscode-errorForeground, #f48771);
@@ -605,10 +645,14 @@ body.vscode-high-contrast-light .select-popup {
   min-height: 0;
   overflow-x: auto;
 }
+/* The commit panel is nested in .changes-panel (display: contents), so the
+   descendant selector is required; a child selector never matched and left the
+   panel in an implicit third track that ignored --commit-width. */
 .changes-workspace.native-diff {
+  --commit-width: clamp(180px, var(--commit-size), calc(100% - 150px));
   grid-template-columns: minmax(150px, 1fr) var(--commit-width);
 }
-.changes-workspace.native-diff > .commit-panel {
+.changes-workspace.native-diff .commit-panel {
   grid-column: 2;
 }
 .changes-panel {
@@ -649,6 +693,9 @@ body.vscode-high-contrast-light .select-popup {
   grid-column: 1;
   grid-row: 3;
   overflow: auto;
+  /* Keep the virtual rows still when focus scrolls; browser scroll anchoring would
+     otherwise move the list by most of a viewport after each arrow key. */
+  overflow-anchor: none;
   min-height: 0;
   padding: 0;
   border-right: 1px solid var(--border);
@@ -748,6 +795,19 @@ body.vscode-high-contrast-light .select-popup {
   height: 22px;
   padding: 0 8px 0 0;
 }
+.file-open {
+  margin-right: 2px;
+}
+.file-missing {
+  flex-shrink: 0;
+  margin-right: 8px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.file-row.selected .file-missing {
+  color: inherit;
+  opacity: 0.75;
+}
 .file-label {
   display: flex;
   align-items: baseline;
@@ -808,6 +868,33 @@ body.vscode-high-contrast-light .select-popup {
 }
 .file-status.renamed {
   color: var(--vscode-gitDecoration-renamedResourceForeground, #73c991);
+}
+/* File names follow VS Code's Git decoration palette so they adapt to the active theme. */
+.file-name.status-modified {
+  color: var(--modified);
+}
+.file-name.status-added {
+  color: var(--green);
+}
+.file-name.status-untracked {
+  color: var(--vscode-gitDecoration-untrackedResourceForeground, var(--green));
+}
+.file-name.status-deleted {
+  color: var(--red);
+}
+.file-name.status-renamed {
+  color: var(--vscode-gitDecoration-renamedResourceForeground, #73c991);
+}
+.file-name.status-conflict {
+  color: var(--vscode-gitDecoration-conflictingResourceForeground, var(--red));
+}
+.file-row.selected .file-name,
+.detail-file-row.selected .file-name,
+.file-row.selected .file-status,
+.detail-file-row.selected .file-status,
+.file-row.selected .file-open,
+.detail-file-row.selected .file-open {
+  color: inherit;
 }
 .stage-badge {
   flex-shrink: 0;
@@ -1308,6 +1395,7 @@ body.vscode-high-contrast-light .select-popup {
 .log-table-header > span:first-child {
   padding-left: 10px;
   flex-shrink: 0;
+  transition: width 120ms ease-out;
 }
 .log-subject {
   display: flex;
@@ -1357,6 +1445,7 @@ body.vscode-high-contrast-light .select-popup {
   left: 0;
   pointer-events: none;
   z-index: 1;
+  transition: width 120ms ease-out;
 }
 .log-row {
   display: flex;
@@ -1370,6 +1459,7 @@ body.vscode-high-contrast-light .select-popup {
 }
 .log-row > span:first-child {
   flex-shrink: 0;
+  transition: width 120ms ease-out;
 }
 .log-row:hover {
   background: var(--surface-hover);
@@ -1401,6 +1491,22 @@ body.vscode-high-contrast-light .select-popup {
   color: var(--vscode-badge-foreground, #ffffff);
   background: var(--vscode-badge-background, #4d4d4d);
   border-color: transparent;
+}
+.merge-badge {
+  display: inline-flex;
+  align-items: center;
+  flex-shrink: 0;
+  padding: 0 4px;
+  line-height: 16px;
+  font-size: 10px;
+  font-weight: 400;
+  border: 1px solid var(--vscode-charts-purple, var(--border));
+  border-radius: 2px;
+  color: var(--vscode-charts-purple, var(--muted));
+}
+.log-row.selected .merge-badge {
+  color: inherit;
+  border-color: currentColor;
 }
 .avatar {
   display: none;
@@ -1499,7 +1605,8 @@ body.vscode-high-contrast-light .select-popup {
   flex-direction: column;
   margin: 0 -8px;
 }
-.detail-files > button {
+.detail-files > button,
+.detail-files > .detail-file-row > button.detail-select {
   display: flex;
   align-items: center;
   gap: 6px;
@@ -1510,10 +1617,13 @@ body.vscode-high-contrast-light .select-popup {
   padding: 0 8px;
   font-size: 12px;
 }
-.detail-files > button:hover {
+.detail-files > button:hover,
+.detail-files > .detail-file-row:hover {
   background: var(--surface-hover);
 }
-.detail-files > button.selected {
+.detail-files > button.selected,
+.detail-files > .detail-file-row > button.detail-select.selected,
+.detail-files > .detail-file-row.selected {
   background: var(--selection);
   color: var(--selection-fg);
 }
@@ -1523,12 +1633,28 @@ body.vscode-high-contrast-light .select-popup {
 .detail-files > button.detail-folder > .codicon {
   flex-shrink: 0;
 }
-.detail-files > button > span:not(.codicon) {
+.detail-files > button > span:not(.codicon),
+.detail-files > .detail-file-row > button.detail-select > span:not(.codicon) {
   min-width: 0;
   flex: 1;
   overflow: hidden;
   white-space: nowrap;
   text-overflow: ellipsis;
+}
+.detail-files > .detail-file-row {
+  display: flex;
+  align-items: center;
+  min-height: 24px;
+}
+.detail-files > .detail-file-row > button.detail-select {
+  flex: 1;
+}
+.detail-files > .detail-file-row > .icon-button {
+  margin-right: 2px;
+}
+.detail-files > .detail-file-row.selected .file-missing {
+  color: inherit;
+  opacity: 0.75;
 }
 .detail-files small {
   margin-left: 7px;
@@ -1692,6 +1818,14 @@ body.vscode-high-contrast-light .select-popup {
 .dialog-shell.framed {
   position: absolute;
   max-width: none;
+}
+/* Popovers follow the control that opened them and are never draggable or resizable. */
+.dialog-shell.popover {
+  position: fixed;
+  max-width: none;
+}
+.dialog-shell.popover > .modal {
+  box-shadow: 0 4px 16px var(--vscode-widget-shadow, #00000066);
 }
 .dialog-shell > .modal {
   width: 100%;
@@ -2238,6 +2372,9 @@ body.vscode-high-contrast-light {
   overflow: hidden;
   text-overflow: ellipsis;
 }
+.branch-context-menu button.danger {
+  color: var(--vscode-errorForeground, #f48771);
+}
 .branch-context-menu button:hover:not(:disabled),
 .branch-context-menu button:focus-visible {
   color: var(--vscode-menu-selectionForeground, var(--selection-fg));
@@ -2324,6 +2461,9 @@ body.vscode-high-contrast-light {
 .branch-dropdown-text small {
   font-size: 11px;
   color: var(--muted);
+}
+.branch-dropdown-name.current .branch-dropdown-text strong {
+  font-weight: 600;
 }
 .branch-dropdown-name:hover .branch-dropdown-text small,
 .branch-dropdown-name:focus-visible .branch-dropdown-text small,
@@ -2412,6 +2552,57 @@ body.vscode-high-contrast-light {
 }
 .comparison-files button:hover {
   background: var(--surface-hover);
+}
+.comparison-files > .comparison-file-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+.comparison-files > .comparison-file-row > button.comparison-select {
+  flex: 1;
+  min-width: 0;
+  width: auto;
+}
+.comparison-files > .comparison-file-row > .icon-button {
+  flex: 0 0 auto;
+  width: 22px;
+  min-width: 22px;
+  height: 22px;
+  min-height: 22px;
+  padding: 3px;
+  gap: 0;
+  margin-right: 4px;
+}
+.comparison-files > .comparison-file-row:hover {
+  background: var(--surface-hover);
+}
+.comparison-files > .comparison-file-row.selected {
+  background: var(--selection);
+  color: var(--selection-fg);
+}
+.comparison-files > .comparison-file-row.selected .file-name,
+.comparison-files > .comparison-file-row.selected .file-status,
+.comparison-files > .comparison-file-row.selected .icon-button {
+  color: inherit;
+}
+.comparison-files > .comparison-file-row > .file-missing {
+  margin-right: 12px;
+}
+.comparison-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin: 6px 0 2px;
+  padding: 0 12px;
+  color: var(--muted);
+  font-size: 11px;
+}
+.comparison-files small {
+  color: var(--muted);
+  font-size: 11px;
+}
+.comparison-files button.comparison-folder {
+  color: var(--fg);
 }
 @media (max-width: 1000px) {
   .sidebar,

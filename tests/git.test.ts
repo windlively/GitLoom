@@ -4,7 +4,7 @@ import { mkdtemp, writeFile, readFile, mkdir, rename, rm, symlink, chmod } from 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { GitService } from '../src/git/service';
-import { parseStatus, parseNumstat } from '../src/git/parsers';
+import { parseStatus, parseNumstat, parseBranches } from '../src/git/parsers';
 
 async function repository(t: { after: (callback: () => Promise<void>) => void }) {
   const root = await mkdtemp(path.join(tmpdir(), 'git-workbench-test-'));
@@ -51,6 +51,27 @@ test('parses NUL-delimited status, rename and unusual filenames', () => {
     additions: 2,
     deletions: 1,
   });
+});
+
+test('parses upstream tracking counters reported by for-each-ref', () => {
+  const branches = parseBranches(
+    'refs/heads/main\0*\0origin/main\0[ahead 2, behind 1]\0local work\n' +
+      'refs/heads/topic\0 \0\0\0no upstream\n' +
+      'refs/heads/stale\0 \0origin/stale\0[gone]\0pruned upstream\n' +
+      'refs/remotes/origin/main\0 \0\0\0remote tip',
+  );
+  assert.deepEqual(
+    branches.map((branch) => [branch.name, branch.ahead, branch.behind]),
+    [
+      ['main', 2, 1],
+      ['topic', 0, 0],
+      ['stale', 0, 0],
+      ['origin/main', 0, 0],
+    ],
+  );
+  assert.equal(branches[0].current, true);
+  assert.equal(branches[0].upstream, 'origin/main');
+  assert.equal(branches[3].remote, true);
 });
 
 test('empty repository → first selected-file commit → real history and diff', async (t) => {
@@ -215,6 +236,13 @@ test('fetch, first push, ahead/behind and fast-forward pull against a real bare 
   await write('local.txt', 'local\n');
   await git.commit(['local.txt'], 'local ahead');
   assert.equal((await git.snapshot()).ahead, 1);
+  // Branch rows carry the same counters as the header, so every local branch can show
+  // its unpushed and unpulled commits after the last fetch.
+  const localBranches = (await git.snapshot()).branches.filter((branch) => !branch.remote);
+  assert.deepEqual(
+    localBranches.map((branch) => [branch.name, branch.ahead, branch.behind]),
+    [['main', 1, 0]],
+  );
   const outgoing = await git.outgoing();
   assert.equal(outgoing.total, 1);
   assert.equal(outgoing.commits[0].subject, 'local ahead');
@@ -233,10 +261,34 @@ test('fetch, first push, ahead/behind and fast-forward pull against a real bare 
   await peer.push();
   await git.fetch();
   assert.equal((await git.snapshot()).behind, 1);
+  const fetched = (await git.snapshot()).branches.find((branch) => branch.name === 'main');
+  assert.deepEqual([fetched?.ahead, fetched?.behind], [0, 1]);
+  // Selecting a local branch must never show commits that only exist on the remote:
+  // the branch log starts at the local head instead of the shared decorated window.
+  assert.deepEqual(
+    (await git.branchLog('main', false)).map((commit) => commit.subject),
+    ['local ahead', 'initial'],
+  );
+  assert.deepEqual(
+    (await git.branchLog('origin/main', true)).map((commit) => commit.subject),
+    ['peer change', 'local ahead', 'initial'],
+  );
+  await assert.rejects(git.branchLog('missing-branch', false), /分支不存在/);
   await git.pull();
   assert.equal(await readFile(path.join(root, 'peer.txt'), 'utf8'), 'remote content\n');
   await write('base.txt', 'dirty\n');
   await assert.rejects(git.pull(), /提交或 Stash/);
+});
+
+test('existing files excludes working-tree deletions and invalid paths', async (t) => {
+  const { root, git, write, initial } = await repository(t);
+  await initial();
+  await write('keep.txt', 'keep\n');
+  await git.commit(['keep.txt'], 'keep');
+  await write('gone.txt', 'gone\n');
+  await git.commit(['gone.txt'], 'gone');
+  await rm(path.join(root, 'gone.txt'));
+  assert.deepEqual(await git.existingFiles(['keep.txt', 'gone.txt', '../outside']), ['keep.txt']);
 });
 
 test('failed hooks report errors and never commit unrelated files', async (t) => {
@@ -285,6 +337,39 @@ test('staging selected files updates the index and leaves other changes untouche
   assert.deepEqual([added.status, added.index, added.worktree], ['added', 'A', ' ']);
   const other = changes.find((change) => change.path === 'other.txt')!;
   assert.deepEqual([other.status, other.index, other.worktree], ['untracked', '?', '?']);
+});
+
+test('deleting files removes them from disk and leaves tracked paths as deletions', async (t) => {
+  const { root, git, write, initial } = await repository(t);
+  await initial();
+  await write('base.txt', 'changed\n');
+  await write('new.txt', 'untracked\n');
+  await git.deleteFiles(['base.txt', 'new.txt']);
+  assert.deepEqual(
+    (await git.snapshot()).changes.map((change) => [change.path, change.status]),
+    [['base.txt', 'deleted']],
+  );
+  await assert.rejects(readFile(path.join(root, 'new.txt'), 'utf8'), /ENOENT/);
+  await assert.rejects(git.deleteFiles(['../outside.txt']), /无效的仓库文件路径/);
+});
+
+test('ignore rules are appended once and only apply to untracked files', async (t) => {
+  const { root, git, write, initial } = await repository(t);
+  await initial();
+  await write('new file.txt', 'new\n');
+  await write('base.txt', 'changed\n');
+  assert.match(await git.ignorePaths(['new file.txt']), /\.gitignore/);
+  assert.equal(await readFile(path.join(root, '.gitignore'), 'utf8'), '/new file.txt\n');
+  assert.match(await git.ignorePaths(['new file.txt']), /已被忽略/);
+  assert.equal(await readFile(path.join(root, '.gitignore'), 'utf8'), '/new file.txt\n');
+  assert.deepEqual((await git.snapshot()).changes.map((change) => change.path).sort(), [
+    '.gitignore',
+    'base.txt',
+  ]);
+  await assert.rejects(git.ignorePaths(['base.txt']), /未跟踪文件/);
+  await write('exclude me.txt', 'local\n');
+  await git.ignorePaths(['exclude me.txt'], 'exclude');
+  assert.match(await readFile(path.join(root, '.git/info/exclude'), 'utf8'), /\/exclude me\.txt/);
 });
 
 test('path validation and symlink boundaries prevent out-of-repository access', async (t) => {
@@ -405,6 +490,17 @@ test('branch creation from selected ref, rename, comparison and clean rebase', a
       ['main.txt', 'added'],
     ],
   );
+  const swapped = await git.compareBranch('feature/source', false, true);
+  assert.equal(swapped.base, comparison.head);
+  assert.equal(swapped.head, comparison.base);
+  assert.deepEqual([swapped.ahead, swapped.behind], [1, 1]);
+  assert.deepEqual(
+    swapped.files.map((file) => [file.path, file.status]),
+    [
+      ['feature.txt', 'added'],
+      ['main.txt', 'deleted'],
+    ],
+  );
   const diff = await git.branchDiff('feature.txt', comparison.base, comparison.head);
   assert.equal(diff.before, 'feature\n');
   assert.equal(diff.after, '');
@@ -423,6 +519,123 @@ test('branch creation from selected ref, rename, comparison and clean rebase', a
   assert.equal((await git.snapshot()).operation, null);
   assert.equal(await git.run(['show', 'HEAD:feature.txt']), 'feature\n');
   assert.equal(await git.run(['show', 'HEAD:main.txt']), 'main\n');
+});
+
+test('updates and pushes another local branch without checking it out', async (t) => {
+  const { git, write, initial } = await repository(t);
+  await initial();
+  const bare = await mkdtemp(path.join(tmpdir(), 'git-workbench-branch-remote-'));
+  t.after(() => rm(bare, { recursive: true, force: true }));
+  await new GitService(bare).run(['init', '--bare', '--initial-branch=main']);
+  await git.run(['remote', 'add', 'origin', bare]);
+  await git.push();
+  await git.createBranch('topic');
+  await write('topic.txt', 'topic one\n');
+  await git.commit(['topic.txt'], 'topic one');
+  await git.push();
+  await git.checkout('main');
+
+  const clone = await mkdtemp(path.join(tmpdir(), 'git-workbench-branch-clone-'));
+  t.after(() => rm(clone, { recursive: true, force: true }));
+  const peer = new GitService(clone);
+  await peer.run(['clone', bare, '.']);
+  await peer.run(['config', 'user.name', 'Peer']);
+  await peer.run(['config', 'user.email', 'peer@example.com']);
+  await peer.run(['config', 'commit.gpgsign', 'false']);
+  await peer.run(['checkout', 'topic']);
+  await writeFile(path.join(clone, 'peer.txt'), 'peer one\n');
+  await peer.commit(['peer.txt'], 'peer one');
+  await peer.push();
+  const headBefore = (await git.run(['rev-parse', 'HEAD'])).trim();
+
+  await git.updateBranch('topic');
+  assert.equal(
+    (await git.run(['rev-parse', 'topic'])).trim(),
+    (await peer.run(['rev-parse', 'HEAD'])).trim(),
+  );
+  assert.equal((await git.run(['rev-parse', 'HEAD'])).trim(), headBefore);
+  const state = await git.snapshot();
+  assert.equal(state.branch, 'main');
+  assert.equal(state.changes.length, 0);
+
+  // A local commit that is not on the upstream blocks the update instead of merging.
+  await git.checkout('topic');
+  await write('local.txt', 'local only\n');
+  await git.commit(['local.txt'], 'local only');
+  await git.checkout('main');
+  await peer.run(['checkout', 'topic']);
+  await writeFile(path.join(clone, 'peer.txt'), 'peer two\n');
+  await peer.commit(['peer.txt'], 'peer two');
+  await peer.push();
+  const localTopic = (await git.run(['rev-parse', 'topic'])).trim();
+  await assert.rejects(git.updateBranch('topic'), /无法更新/);
+  assert.equal((await git.run(['rev-parse', 'topic'])).trim(), localTopic);
+  await assert.rejects(git.pushBranch('topic'), /rejected|failed/i);
+
+  // A branch without an upstream cannot be updated and is pushed under its own name.
+  await git.createBranch('push-me');
+  await write('push-me.txt', 'push me\n');
+  await git.commit(['push-me.txt'], 'push me');
+  const pushTip = (await git.run(['rev-parse', 'HEAD'])).trim();
+  await git.checkout('main');
+  await assert.rejects(git.updateBranch('push-me'), /上游/);
+  await git.pushBranch('push-me');
+  assert.match(await git.run(['ls-remote', '--heads', 'origin', 'push-me']), new RegExp(pushTip));
+
+  // The current branch only fast-forwards and never runs over local changes.
+  await write('base.txt', 'dirty\n');
+  await assert.rejects(git.updateBranch('main'), /提交或 Stash/);
+  await git.run(['restore', 'base.txt']);
+  await peer.run(['checkout', 'main']);
+  await writeFile(path.join(clone, 'peer-main.txt'), 'peer main\n');
+  await peer.commit(['peer-main.txt'], 'peer main');
+  await peer.push();
+  await git.updateBranch('main');
+  assert.equal((await git.run(['rev-parse', 'HEAD'])).trim(), (await peer.run(['rev-parse', 'HEAD'])).trim());
+});
+
+test('branch rows keep a stable order after updating a branch from its upstream', async (t) => {
+  const { git, write, initial } = await repository(t);
+  await initial();
+  const bare = await mkdtemp(path.join(tmpdir(), 'git-workbench-order-remote-'));
+  t.after(() => rm(bare, { recursive: true, force: true }));
+  await new GitService(bare).run(['init', '--bare', '--initial-branch=main']);
+  await git.run(['remote', 'add', 'origin', bare]);
+  await git.push();
+
+  // Dated commits keep the test deterministic: `topic` is older than `main` before the
+  // update and newer afterwards, so a commit-date sort would move it to the top.
+  const commitAt = async (file: string, message: string, date: string) => {
+    await write(file, `${message}\n`);
+    await git.run(['add', file]);
+    await git.run(['commit', '-m', message], {
+      env: { GIT_COMMITTER_DATE: date, GIT_AUTHOR_DATE: date },
+    });
+  };
+  await git.createBranch('topic');
+  await commitAt('topic.txt', 'topic one', '2021-01-01T00:00:00');
+  await git.push();
+  await git.checkout('main');
+  await commitAt('main.txt', 'main two', '2022-01-01T00:00:00');
+
+  const clone = await mkdtemp(path.join(tmpdir(), 'git-workbench-order-clone-'));
+  t.after(() => rm(clone, { recursive: true, force: true }));
+  const peer = new GitService(clone);
+  await peer.run(['clone', bare, '.']);
+  await peer.run(['config', 'user.name', 'Peer']);
+  await peer.run(['config', 'user.email', 'peer@example.com']);
+  await peer.run(['config', 'commit.gpgsign', 'false']);
+  await peer.run(['checkout', 'topic']);
+  await writeFile(path.join(clone, 'peer.txt'), 'peer one\n');
+  await peer.commit(['peer.txt'], 'peer one');
+  await peer.push();
+
+  const branchOrder = async () =>
+    (await git.snapshot()).branches.filter((branch) => !branch.remote).map((branch) => branch.name);
+  const before = await branchOrder();
+  assert.deepEqual(before, ['main', 'topic']);
+  await git.updateBranch('topic');
+  assert.deepEqual(await branchOrder(), before);
 });
 
 test('remote checkout reuses tracking local branch, upstream configuration and leased remote deletion', async (t) => {

@@ -68,12 +68,16 @@ export function parseBranches(raw: string): Branch[] {
     .split('\n')
     .filter(Boolean)
     .map((line) => {
-      const [ref, head, upstream, subject] = line.split('\0');
+      // %(upstream:track) reports "[ahead 2, behind 1]", "[gone]" or nothing, and Git
+      // keeps that wording in English regardless of the configured locale.
+      const [ref, head, upstream, track = '', subject] = line.split('\0');
       return {
         name: ref.replace(/^refs\/(heads|remotes)\//, ''),
         current: head === '*',
         remote: ref.startsWith('refs/remotes/'),
         upstream: upstream || '',
+        ahead: Number(/ahead (\d+)/.exec(track)?.[1] ?? 0),
+        behind: Number(/behind (\d+)/.exec(track)?.[1] ?? 0),
         subject: subject || '',
       };
     })

@@ -4,6 +4,8 @@ import {
   ArrowDown,
   ArrowDownToLine,
   ArrowLeftRight,
+  ArrowRight,
+  ArrowSwap,
   ArrowUp,
   ArrowUpFromLine,
   BookOpen,
@@ -30,6 +32,7 @@ import {
   GitCompareArrows,
   GitFork,
   GitMerge,
+  GoToFile,
   History,
   Info,
   Layers,
@@ -66,16 +69,18 @@ import type {
 } from '../../src/shared/types';
 import { isPreview, loadState, request, saveState, setRepository, subscribe } from './bridge';
 import { makeDiffRows } from './diff';
-import { COMMIT_ROW_HEIGHT, makeGraph } from './graph';
+import { COMMIT_ROW_HEIGHT, graphColumnWidth, makeGraph } from './graph';
 import { defaultSizes, restoreSizes, ResizeHandle, type PaneSizes } from './resize';
-import { DialogWindow, restoreDialogFrames, type DialogFrame } from './dialog-window';
+import { DialogWindow, restoreDialogFrames, type DialogAnchor, type DialogFrame } from './dialog-window';
 import { BranchDropdown } from './branch-dropdown';
-import { groupBranches, type BranchFolder } from './branch-groups';
+import { BranchSync } from './branch-sync';
+import { currentFirst, groupBranches, type BranchFolder } from './branch-groups';
 import { groupFiles, type FileFolder } from './file-groups';
 import { ContextMenu, type MenuAction } from './context-menu';
 import { SelectMenu, type SelectOption } from './select-menu';
 import { dateLocale, t } from './i18n';
 import { offsetRange, uniformRange, useViewport } from './virtual';
+import { isFileListKey, nextRowIndex, rowIndex, type FileListKey } from './file-list-nav';
 import './styles.css';
 
 if (isPreview && new URLSearchParams(window.location.search).get('layout') === 'panel') {
@@ -85,6 +90,11 @@ const panelLayout = true;
 const FILE_ROW_HEIGHT = 22,
   FOLDER_ROW_HEIGHT = 22,
   GROUP_ROW_HEIGHT = 24;
+// One tree level in the changed-file and commit-detail lists.
+const FILE_TREE_INDENT = 16;
+// Caps the graph column so a history with dozens of parallel branches still leaves
+// room for subjects; lanes past the cap are clipped at the column edge.
+const MAX_GRAPH_WIDTH = 400;
 const NO_CHANGES: Change[] = [];
 const fileFolderKey = (groupId: string, path: string) => `${groupId}\0${path}`;
 
@@ -92,6 +102,9 @@ type Dialog = {
   type:
     'newBranch' | 'renameBranch' | 'upstream' | 'compare' | 'changelist' | 'stash' | 'push' | 'move' | 'help';
   branch?: Branch;
+  anchor?: DialogAnchor;
+  // Set when the move dialog is opened from the file context menu instead of the checkbox selection.
+  paths?: string[];
 };
 type Stored = {
   view: View;
@@ -149,7 +162,7 @@ function IconButton({
 }: {
   title: string;
   children: React.ReactNode;
-  onClick?: () => void;
+  onClick?: (event: React.MouseEvent<HTMLButtonElement>) => void;
   disabled?: boolean;
   className?: string;
 }) {
@@ -193,6 +206,25 @@ function FileIcon({ file }: { file: string }) {
       className={`file-type ${/\.tsx?$/.test(file) ? 'ts' : file.endsWith('.css') ? 'css' : ''}`}
     />
   );
+}
+type FileListItem =
+  { kind: 'folder'; folder: FileFolder; depth: number } | { kind: 'file'; change: Change; depth: number };
+// Flattens a directory tree into visible rows for the commit detail and comparison lists.
+function flattenFileItems(files: Change[], grouped: boolean, collapsed: Set<string>): FileListItem[] {
+  if (!grouped) return files.map((change): FileListItem => ({ kind: 'file', change, depth: 0 }));
+  const items: FileListItem[] = [];
+  const pushFile = (change: Change, depth: number) => items.push({ kind: 'file', change, depth });
+  const pushFolder = (folder: FileFolder, depth: number) => {
+    items.push({ kind: 'folder', folder, depth });
+    if (collapsed.has(folder.path)) return;
+    for (const child of folder.folders) pushFolder(child, depth + 1);
+    for (const file of folder.files) pushFile(file.change, depth + 1);
+  };
+  for (const entry of groupFiles(files)) {
+    if (entry.kind === 'folder') pushFolder(entry, 0);
+    else pushFile(entry.change, 0);
+  }
+  return items;
 }
 
 function Code({ text }: { text: string }) {
@@ -480,6 +512,13 @@ function App() {
   const closeCommitMenu = useCallback(() => setCommitMenu(null), []);
   const [branchDropdown, setBranchDropdown] = useState<HTMLButtonElement | null>(null);
   const [comparison, setComparison] = useState<BranchComparison | null>(null);
+  const [comparisonSwap, setComparisonSwap] = useState(false);
+  const [compareGrouped, setCompareGrouped] = useState(true);
+  const [collapsedCompareFolders, setCollapsedCompareFolders] = useState<Set<string>>(new Set());
+  const [comparisonFile, setComparisonFile] = useState('');
+  const [detailExisting, setDetailExisting] = useState<{ key: string; paths: Set<string> } | null>(null);
+  const [stashExisting, setStashExisting] = useState<{ key: string; paths: Set<string> } | null>(null);
+  const [compareExisting, setCompareExisting] = useState<{ key: string; paths: Set<string> } | null>(null);
   const [snapshot, setSnapshot] = useState<Snapshot | null>(null);
   const [view, setView] = useState<View>(stored.view);
   const [selected, setSelected] = useState<Set<string>>(new Set());
@@ -502,6 +541,7 @@ function App() {
     [branchQuery, setBranchQuery] = useState(''),
     [logQuery, setLogQuery] = useState('');
   const [branchFilter, setBranchFilter] = useState(''),
+    [branchCommits, setBranchCommits] = useState<Commit[] | null>(null),
     [activeCommit, setActiveCommit] = useState(''),
     [detail, setDetail] = useState<CommitDetail | null>(null);
   const [branchGrouped, setBranchGrouped] = useState(stored.branchGrouped === true);
@@ -525,6 +565,8 @@ function App() {
     commitInput = useRef<HTMLTextAreaElement>(null);
   const fileViewport = useViewport(),
     logViewport = useViewport();
+  const fileListElement = useRef<HTMLDivElement | null>(null),
+    logListElement = useRef<HTMLDivElement | null>(null);
   const currentDraft = drafts[snapshot?.repository?.path || ''] || '';
   const changes = snapshot?.changes ?? NO_CHANGES;
   const isBusy = !!busy;
@@ -660,10 +702,19 @@ function App() {
     };
   }, [dialog]);
   useEffect(() => {
+    setComparisonSwap(false);
+    setCollapsedCompareFolders(new Set());
+    setComparisonFile('');
+  }, [dialog?.type, dialog?.branch?.name, dialog?.branch?.remote]);
+  useEffect(() => {
     setComparison(null);
     if (dialog?.type !== 'compare' || !dialog.branch) return;
     let cancelled = false;
-    void request('compareBranch', { branch: dialog.branch.name, remote: dialog.branch.remote })
+    void request('compareBranch', {
+      branch: dialog.branch.name,
+      remote: dialog.branch.remote,
+      swap: comparisonSwap,
+    })
       .then((value) => {
         if (!cancelled) setComparison(value);
       })
@@ -673,7 +724,23 @@ function App() {
     return () => {
       cancelled = true;
     };
-  }, [dialog, snapshot?.repository?.path]);
+  }, [dialog, snapshot?.repository?.path, comparisonSwap]);
+  useEffect(() => {
+    if (!comparison) return;
+    const key = `${comparison.base}:${comparison.head}`;
+    const paths = comparison.files.map((file) => file.path);
+    setCompareExisting({ key, paths: new Set(paths) });
+    if (!paths.length) return;
+    let cancelled = false;
+    void request('existingFiles', { paths })
+      .then((value) => {
+        if (!cancelled) setCompareExisting({ key, paths: new Set(value) });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [comparison]);
   const perform = async <M extends Method>(
     method: M,
     params: Requests[M]['params'],
@@ -697,7 +764,17 @@ function App() {
           ...previous,
         ]);
       after?.();
-      if (!['openFile', 'openDiff', 'resolve', 'copyBranch', 'openBranchDiff'].includes(method))
+      if (
+        ![
+          'openFile',
+          'openDiff',
+          'resolve',
+          'copyBranch',
+          'openBranchDiff',
+          'copyPaths',
+          'revealPath',
+        ].includes(method)
+      )
         await refresh();
       const pushError = method === 'commit' ? (result as Requests['commit']['result']).pushError : undefined;
       setNotice(
@@ -712,6 +789,24 @@ function App() {
       setBusy('');
     }
   };
+  useEffect(() => {
+    if (!branchFilter) {
+      setBranchCommits(null);
+      return;
+    }
+    let cancelled = false;
+    void request('branchLog', { branch: branchFilter })
+      .then((commits) => {
+        if (!cancelled) setBranchCommits(commits);
+      })
+      .catch(() => {
+        // A renamed or deleted branch leaves nothing to show instead of the old list.
+        if (!cancelled) setBranchCommits([]);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [branchFilter, snapshot?.updatedAt, snapshot?.repository?.path]);
   useEffect(() => {
     if (view !== 'log' || !activeCommit) {
       setDetail(null);
@@ -730,6 +825,22 @@ function App() {
       cancelled = true;
     };
   }, [activeCommit, view, snapshot?.repository?.path]);
+  useEffect(() => {
+    if (!detail) return;
+    const key = detail.commit.hash;
+    const paths = detail.files.map((file) => file.path);
+    setDetailExisting({ key, paths: new Set(paths) });
+    if (!paths.length) return;
+    let cancelled = false;
+    void request('existingFiles', { paths })
+      .then((value) => {
+        if (!cancelled) setDetailExisting({ key, paths: new Set(value) });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [detail]);
   useEffect(() => {
     if (view !== 'stash' || !activeStash) {
       setStashFiles([]);
@@ -751,16 +862,64 @@ function App() {
       cancelled = true;
     };
   }, [activeStash, view, snapshot?.repository?.path]);
-  const openNativeDiff = (path: string, commit?: string, stash?: string) => {
+  useEffect(() => {
+    if (!stashFiles.length) return;
+    const key = activeStash;
+    const paths = stashFiles.map((file) => file.path);
+    setStashExisting({ key, paths: new Set(paths) });
+    let cancelled = false;
+    void request('existingFiles', { paths })
+      .then((value) => {
+        if (!cancelled) setStashExisting({ key, paths: new Set(value) });
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [stashFiles, activeStash]);
+  const openNativeDiff = (path: string, commit?: string, stash?: string, keepFocus = true) => {
     if (!path) return;
     const key = `${path}\0${commit || ''}\0${stash || ''}`;
     const now = Date.now();
     if (key === lastNative.current.key && now - lastNative.current.at < 400) return;
     lastNative.current = { key, at: now };
-    void request('openDiff', { path, ...(commit ? { commit } : {}), ...(stash ? { stash } : {}) }).catch(
-      (error) => setNotice({ message: (error as Error).message, error: true }),
+    void request('openDiff', {
+      path,
+      ...(commit ? { commit } : {}),
+      ...(stash ? { stash } : {}),
+      keepFocus,
+    }).catch((error) => setNotice({ message: (error as Error).message, error: true }));
+  };
+  const openWorkingFile = (path: string) => {
+    void request('openFile', { path }).catch((error) =>
+      setNotice({ message: (error as Error).message, error: true }),
     );
   };
+  const openFileAction = (path: string, exists: boolean) =>
+    exists ? (
+      <IconButton
+        title={t('Open file {0}', path)}
+        className="file-open"
+        onClick={(event) => {
+          event.stopPropagation();
+          openWorkingFile(path);
+        }}
+      >
+        <GoToFile size={14} />
+      </IconButton>
+    ) : (
+      <span className="file-missing" title={t('File no longer exists')}>
+        {t('Deleted')}
+      </span>
+    );
+  const detailKey = detail?.commit.hash ?? '';
+  const detailExists = (path: string) =>
+    !detailExisting || detailExisting.key !== detailKey || detailExisting.paths.has(path);
+  const stashExists = (path: string) =>
+    !stashExisting || stashExisting.key !== activeStash || stashExisting.paths.has(path);
+  const comparisonKey = comparison ? `${comparison.base}:${comparison.head}` : '';
+  const compareExists = (path: string) =>
+    !compareExisting || compareExisting.key !== comparisonKey || compareExisting.paths.has(path);
   const diffFile = view === 'changes' ? activeFile : view === 'log' ? historyFile : stashFile;
   useEffect(() => {
     const sequence = ++diffSequence.current;
@@ -831,7 +990,7 @@ function App() {
     window.addEventListener('keydown', handle);
     return () => window.removeEventListener('keydown', handle);
   });
-  const showDialog = (value: Dialog) => {
+  const showDialog = (value: Dialog, anchor?: DialogAnchor) => {
     setBranchMenu(null);
     setDialogValue(
       value.type === 'renameBranch'
@@ -840,7 +999,7 @@ function App() {
           ? value.branch?.upstream || ''
           : '',
     );
-    setDialog(value);
+    setDialog(anchor ? { ...value, anchor } : value);
   };
   const toggle = (file: string) =>
     setSelected((previous) => {
@@ -952,42 +1111,43 @@ function App() {
       next.has(path) ? next.delete(path) : next.add(path);
       return next;
     });
-  const detailItems = useMemo(() => {
-    if (!detail || fileLayout !== 'tree') return [];
-    const items: (
-      { kind: 'folder'; folder: FileFolder; depth: number } | { kind: 'file'; change: Change; depth: number }
-    )[] = [];
-    const pushFile = (change: Change, depth: number) => items.push({ kind: 'file', change, depth });
-    const pushFolder = (folder: FileFolder, depth: number) => {
-      items.push({ kind: 'folder', folder, depth });
-      if (collapsedDetailFolders.has(folder.path)) return;
-      for (const child of folder.folders) pushFolder(child, depth + 1);
-      for (const file of folder.files) pushFile(file.change, depth + 1);
-    };
-    for (const entry of groupFiles(detail.files)) {
-      if (entry.kind === 'folder') pushFolder(entry, 0);
-      else pushFile(entry.change, 0);
-    }
-    return items;
-  }, [detail, fileLayout, collapsedDetailFolders]);
+  const detailItems = useMemo(
+    () =>
+      detail && fileLayout === 'tree' ? flattenFileItems(detail.files, true, collapsedDetailFolders) : [],
+    [detail, fileLayout, collapsedDetailFolders],
+  );
+  const toggleCompareFolder = (path: string) =>
+    setCollapsedCompareFolders((previous) => {
+      const next = new Set(previous);
+      next.has(path) ? next.delete(path) : next.add(path);
+      return next;
+    });
+  const compareItems = useMemo(
+    () => flattenFileItems(comparison?.files ?? [], compareGrouped, collapsedCompareFolders),
+    [comparison, compareGrouped, collapsedCompareFolders],
+  );
   const detailFileRow = (file: Change, depth: number) => (
-    <button
-      className={historyFile === file.path ? 'selected' : ''}
-      key={file.path}
-      title={file.path}
-      style={fileGrouped ? { paddingLeft: 26 + depth * 12 } : undefined}
-      onClick={() => {
-        setHistoryFile(file.path);
-        if (!showInlineDiff) openNativeDiff(file.path, activeCommit);
-      }}
-    >
-      <FileIcon file={file.path} />
-      <span>
-        {basename(file.path)}
-        {!fileGrouped && <small>{dirname(file.path)}</small>}
-      </span>
-      <b className={`file-status ${file.status}`}>{statusLetters[file.status]}</b>
-    </button>
+    <div className={`detail-file-row${historyFile === file.path ? ' selected' : ''}`} key={file.path}>
+      <button
+        className={`detail-select${historyFile === file.path ? ' selected' : ''}`}
+        data-path={file.path}
+        title={file.path}
+        style={fileGrouped ? { paddingLeft: 26 + depth * FILE_TREE_INDENT } : undefined}
+        onFocus={() => setHistoryFile(file.path)}
+        onClick={() => {
+          setHistoryFile(file.path);
+          if (!showInlineDiff) openNativeDiff(file.path, activeCommit);
+        }}
+      >
+        <FileIcon file={file.path} />
+        <span className={`file-name status-${file.status}`}>
+          {basename(file.path)}
+          {!fileGrouped && <small>{dirname(file.path)}</small>}
+        </span>
+        <b className={`file-status ${file.status}`}>{statusLetters[file.status]}</b>
+      </button>
+      {openFileAction(file.path, detailExists(file.path))}
+    </div>
   );
   const [fileStart, fileEnd] = offsetRange(fileItems.offsets, fileViewport);
   const selectFileRow = (
@@ -1017,6 +1177,151 @@ function App() {
     fileSelectionAnchor.current = path;
     setFileSelection(new Set([path]));
   };
+  // Arrows walk file rows by logical index, so the virtual change list keeps
+  // working for rows that are not rendered yet.
+  const selectedFileListPath = (container: HTMLElement) => {
+    const kind = container.dataset.fileList;
+    if (kind === 'compare') return comparisonFile;
+    if (kind === 'stash') return stashFile;
+    if (kind === 'detail') return historyFile;
+    return activeFile;
+  };
+  const fileListRow = (container: HTMLElement, path: string) =>
+    path ? container.querySelector<HTMLButtonElement>(`[data-path="${CSS.escape(path)}"]`) : null;
+  const restoreFileListFocus = (container: HTMLElement) => {
+    const active = document.activeElement;
+    if (active && active !== document.body && active !== document.documentElement) return;
+    // Focus the row that owns the selection. The selected class sits on the row
+    // wrapper for some lists, and falling back to the first row would move the
+    // anchor there, so the next arrow key restarts at the top of the list.
+    fileListRow(container, selectedFileListPath(container))?.focus({ preventScroll: true });
+  };
+  // Virtual lists render only a window of rows, so scroll the target into view and
+  // retry focusing it for a few frames until the new window is rendered.
+  const focusListRow = (container: HTMLElement, top: number, rowHeight: number, selector: string) => {
+    const bottom = top + rowHeight;
+    if (top < container.scrollTop) container.scrollTop = Math.max(0, top - rowHeight);
+    else if (bottom > container.scrollTop + container.clientHeight)
+      container.scrollTop = bottom - container.clientHeight + rowHeight;
+    const focus = (attempt = 0) => {
+      const row = container.querySelector<HTMLButtonElement>(selector);
+      if (row) row.focus({ preventScroll: true });
+      else if (attempt < 8) requestAnimationFrame(() => focus(attempt + 1));
+    };
+    focus();
+  };
+  const focusChangesRow = (path: string) => {
+    const container = fileListElement.current;
+    const index = fileItems.items.findIndex((item) => item.kind === 'file' && item.change.path === path);
+    if (!container || index < 0) return;
+    focusListRow(
+      container,
+      fileItems.offsets[index],
+      FILE_ROW_HEIGHT,
+      `.file-select[data-path="${CSS.escape(path)}"]`,
+    );
+  };
+  const navigateChangesList = (
+    key: FileListKey,
+    modifiers?: { shiftKey: boolean; metaKey: boolean; ctrlKey: boolean },
+  ) => {
+    const paths = visibleFilePaths,
+      path = paths[nextRowIndex(key, paths.indexOf(activeFile), paths.length)];
+    if (!path) return;
+    selectFileRow(path, modifiers);
+    focusChangesRow(path);
+  };
+  const navigateDomFileList = (container: HTMLElement, key: FileListKey) => {
+    const rows = [...container.querySelectorAll<HTMLButtonElement>('.detail-select, .comparison-select')];
+    const focused = rowIndex(rows, document.activeElement),
+      selected = rows.findIndex((row) => row.dataset.path === selectedFileListPath(container)),
+      next = rows[nextRowIndex(key, focused >= 0 ? focused : selected, rows.length)];
+    if (!next) return;
+    next.focus();
+    const path = next.dataset.path || '',
+      kind = container.dataset.fileList;
+    if (kind === 'compare') setComparisonFile(path);
+    else if (kind === 'stash') setStashFile(path);
+    else setHistoryFile(path);
+  };
+  const currentFileList = () => {
+    if (dialog?.type === 'compare') return document.querySelector<HTMLElement>('[data-file-list="compare"]');
+    if (view === 'changes') return document.querySelector<HTMLElement>('[data-file-list="changes"]');
+    if (view === 'stash') return document.querySelector<HTMLElement>('[data-file-list="stash"]');
+    if (view === 'log') return document.querySelector<HTMLElement>('[data-file-list="detail"]');
+    return null;
+  };
+  const moveFileListFocus = (container: HTMLElement, key: FileListKey) => {
+    if (container.dataset.fileList === 'changes') navigateChangesList(key);
+    else navigateDomFileList(container, key);
+  };
+  const handleFileListKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!isFileListKey(event.key)) return;
+    // Arrows only move the selection; Enter or a click opens the diff, so browsing
+    // never hands the keyboard focus to an editor tab.
+    event.preventDefault();
+    event.stopPropagation();
+    moveFileListFocus(event.currentTarget, event.key);
+  };
+  // The commit history is virtualized the same way, so it walks logical rows too.
+  const navigateCommitList = (key: FileListKey) => {
+    const container = logListElement.current;
+    const index = nextRowIndex(
+      key,
+      visibleCommits.findIndex((commit) => commit.hash === activeCommit),
+      visibleCommits.length,
+    );
+    const commit = visibleCommits[index];
+    if (!container || !commit) return;
+    setActiveCommit(commit.hash);
+    setHistoryFile('');
+    focusListRow(
+      container,
+      index * COMMIT_ROW_HEIGHT,
+      COMMIT_ROW_HEIGHT,
+      `.log-row[data-hash="${CSS.escape(commit.hash)}"]`,
+    );
+  };
+  const handleCommitListKeyDown = (event: React.KeyboardEvent<HTMLElement>) => {
+    if (!isFileListKey(event.key)) return;
+    event.preventDefault();
+    event.stopPropagation();
+    navigateCommitList(event.key);
+  };
+  // A native diff can take the editor focus. When the panel gets it back without a
+  // focused row, send the arrow keys to the list instead of scrolling the panel.
+  useEffect(() => {
+    const handle = (event: KeyboardEvent) => {
+      if (!isFileListKey(event.key) || event.defaultPrevented) return;
+      if (event.altKey || event.metaKey || event.ctrlKey || event.shiftKey) return;
+      const active = document.activeElement;
+      if (active && active !== document.body && active !== document.documentElement) return;
+      const target = event.target as HTMLElement | null;
+      if (target?.closest('input, textarea, select, [contenteditable="true"]')) return;
+      // History owns the keyboard through its commit list; the detail file list only
+      // takes over once a row inside it has focus.
+      if (view === 'log' && logListElement.current) {
+        event.preventDefault();
+        navigateCommitList(event.key);
+        return;
+      }
+      const container = currentFileList();
+      if (!container) return;
+      event.preventDefault();
+      moveFileListFocus(container, event.key);
+      restoreFileListFocus(container);
+    };
+    window.addEventListener('keydown', handle);
+    return () => window.removeEventListener('keydown', handle);
+  });
+  useEffect(() => {
+    const restore = () => {
+      const container = currentFileList();
+      if (container) restoreFileListFocus(container);
+    };
+    window.addEventListener('focus', restore);
+    return () => window.removeEventListener('focus', restore);
+  });
   const openFileMenu = (change: Change, x: number, y: number) => {
     const paths = fileSelection.has(change.path) ? [...fileSelection] : [change.path];
     if (!fileSelection.has(change.path)) {
@@ -1031,7 +1336,35 @@ function App() {
     const targets = changes.filter((change) => chosen.has(change.path));
     const conflict = targets.some((change) => change.status === 'conflict');
     const alreadyStaged = targets.length > 0 && targets.every((change) => stageState(change) === 'staged');
+    const untracked = targets.length > 0 && targets.every((change) => change.status === 'untracked');
+    const onDisk = targets.filter((change) => change.status !== 'deleted');
+    const single = paths.length === 1;
     return [
+      {
+        label: t('Show Diff'),
+        icon: <GitCompareArrows size={14} />,
+        disabled: !single || conflict,
+        run: () => (showInlineDiff ? setActiveFile(paths[0]) : openNativeDiff(paths[0])),
+      },
+      {
+        label: t('Open File'),
+        icon: <GoToFile size={14} />,
+        disabled: !single || !onDisk.length,
+        run: () => openWorkingFile(paths[0]),
+      },
+      {
+        label: t('Copy Path'),
+        icon: <File size={14} />,
+        disabled: !targets.length,
+        run: () => void perform('copyPaths', { paths, absolute: true }, t('Copy Path')),
+      },
+      {
+        label: t('Copy Relative Path'),
+        icon: <File size={14} />,
+        separator: true,
+        disabled: !targets.length,
+        run: () => void perform('copyPaths', { paths }, t('Copy Relative Path')),
+      },
       {
         label: paths.length > 1 ? t('Add {0} files to Git', paths.length) : t('Add to Git'),
         icon: <Plus size={14} />,
@@ -1039,11 +1372,51 @@ function App() {
         run: () => void perform('stage', { paths }, t('Add to Git')),
       },
       {
+        label: t('Rollback Changes…'),
+        icon: <Undo2 size={14} />,
+        disabled: isBusy || !targets.length || conflict,
+        run: () => void perform('discard', { paths }, t('Discard Changes')),
+      },
+      {
+        label: t('Delete Files…'),
+        icon: <Trash2 size={14} />,
+        danger: true,
+        separator: true,
+        disabled: isBusy || !onDisk.length,
+        run: () => void perform('deleteFiles', { paths }, t('Delete Files')),
+      },
+      {
+        label: t('Add to .gitignore'),
+        icon: <ShieldCheck size={14} />,
+        separator: true,
+        disabled: isBusy || !untracked,
+        run: () => void perform('ignorePaths', { paths }, t('Add to .gitignore')),
+      },
+      {
+        label: t('Add to .git/info/exclude'),
+        icon: <ShieldCheck size={14} />,
+        disabled: isBusy || !untracked,
+        run: () => void perform('ignorePaths', { paths, target: 'exclude' }, t('Add to .git/info/exclude')),
+      },
+      {
+        label: t('Move to Another Changelist…'),
+        icon: <FolderClosed size={14} />,
+        separator: true,
+        disabled: isBusy || !targets.length,
+        run: (anchor) => showDialog({ type: 'move', paths }, anchor),
+      },
+      {
         label: t('Commit Selected Files…'),
         icon: <GitCommitHorizontal size={14} />,
-        separator: true,
         disabled: isBusy || !targets.length || conflict || !!snapshot?.operation,
         run: () => commitPaths(paths),
+      },
+      {
+        label: t('Reveal in File Manager'),
+        icon: <ExternalLink size={14} />,
+        separator: true,
+        disabled: !single || !onDisk.length,
+        run: () => void perform('revealPath', { path: paths[0] }, t('Reveal in File Manager')),
       },
     ];
   };
@@ -1053,37 +1426,45 @@ function App() {
   const totalDeleted = changes
     .filter((change) => selected.has(change.path))
     .reduce((sum, change) => sum + change.deletions, 0);
-  const localBranches = (snapshot?.branches || []).filter(
-    (branch) => !branch.remote && branch.name.toLowerCase().includes(branchQuery.toLowerCase()),
+  // Keep the checked-out branch first; the rest keeps the host's name order.
+  const localBranches = currentFirst(
+    (snapshot?.branches || []).filter(
+      (branch) => !branch.remote && branch.name.toLowerCase().includes(branchQuery.toLowerCase()),
+    ),
   );
   const remoteBranches = (snapshot?.branches || []).filter(
     (branch) => branch.remote && branch.name.toLowerCase().includes(branchQuery.toLowerCase()),
   );
   const visibleCommits = useMemo(() => {
-    let commits = snapshot?.commits || [];
-    if (branchFilter) {
-      const tip = commits.find((commit) =>
-        commit.refs.some((ref) => ref === branchFilter || ref === `HEAD -> ${branchFilter}`),
-      );
-      const reachable = new Set<string>();
-      const queue = tip ? [tip.hash] : [];
-      const map = new Map(commits.map((commit) => [commit.hash, commit]));
-      while (queue.length) {
-        const hash = queue.pop()!;
-        if (!reachable.has(hash)) {
-          reachable.add(hash);
-          queue.push(...(map.get(hash)?.parents || []));
-        }
-      }
-      commits = commits.filter((commit) => reachable.has(commit.hash));
-    }
+    // A selected branch loads its own history from Git: filtering the shared log window
+    // dropped older commits and could keep commits that only exist on the remote.
+    const commits = branchFilter ? (branchCommits ?? []) : snapshot?.commits || [];
     const query = logQuery.toLowerCase();
     return commits.filter((commit) =>
       `${commit.subject} ${commit.author} ${commit.hash}`.toLowerCase().includes(query),
     );
-  }, [snapshot?.commits, branchFilter, logQuery]);
+  }, [snapshot?.commits, branchFilter, branchCommits, logQuery]);
+  // Keep the selection inside the visible history, so the detail pane never keeps a
+  // commit that belongs to the branch selected before.
+  useEffect(() => {
+    if (!visibleCommits.length || visibleCommits.some((commit) => commit.hash === activeCommit)) return;
+    setActiveCommit(visibleCommits[0].hash);
+    setHistoryFile('');
+  }, [visibleCommits, activeCommit]);
   const graph = useMemo(() => makeGraph(visibleCommits), [visibleCommits]);
   const [logStart, logEnd] = uniformRange(visibleCommits.length, COMMIT_ROW_HEIGHT, logViewport);
+  // Size the graph column from the rows actually on screen. Reserving the width of
+  // the densest merge anywhere in history left a wide empty gutter above it.
+  const graphWidth = useMemo(() => {
+    const first = Math.floor(logViewport.top / COMMIT_ROW_HEIGHT);
+    const last = Math.max(
+      first + 1,
+      Math.ceil((logViewport.top + (logViewport.height || COMMIT_ROW_HEIGHT)) / COMMIT_ROW_HEIGHT),
+    );
+    let lanes = 1;
+    for (let index = first; index < last; index++) lanes = Math.max(lanes, graph.rowLanes[index] ?? 1);
+    return Math.min(MAX_GRAPH_WIDTH, graphColumnWidth(lanes));
+  }, [graph, logViewport.top, logViewport.height]);
   const repositoryOptions = useMemo<SelectOption[]>(() => {
     const list: SelectOption[] = [];
     if (!snapshot?.repository) list.push({ value: '', label: t('Select repository') });
@@ -1111,6 +1492,7 @@ function App() {
       diffFile,
       view === 'log' ? activeCommit : undefined,
       view === 'stash' ? activeStash : undefined,
+      false,
     );
   };
   const closeBranchDropdown = () => {
@@ -1156,7 +1538,7 @@ function App() {
         label: t('Create and switch from this branch…'),
         icon: <Plus size={14} />,
         disabled: locked,
-        run: () => showDialog({ type: 'newBranch', branch }),
+        run: (anchor) => showDialog({ type: 'newBranch', branch }, anchor),
       },
       {
         label: t('Compare with current branch…'),
@@ -1188,6 +1570,24 @@ function App() {
         run: () => void perform('rebase', params, t('Rebase'), () => setDialog(null)),
       },
     ];
+    if (!branch.remote && !branch.current)
+      actions.push(
+        {
+          label: t('Update branch from its upstream (fast-forward only)'),
+          icon: <ArrowDownToLine size={14} />,
+          disabled: locked || !branch.upstream,
+          separator: true,
+          run: () =>
+            void perform('updateBranch', { branch: branch.name }, t('Update Branch'), () => setDialog(null)),
+        },
+        {
+          label: t('Push this branch to its remote…'),
+          icon: <ArrowUpFromLine size={14} />,
+          disabled: locked,
+          run: () =>
+            void perform('pushBranch', { branch: branch.name }, t('Push Branch'), () => setDialog(null)),
+        },
+      );
     if (!branch.remote)
       actions.push(
         {
@@ -1195,13 +1595,13 @@ function App() {
           icon: <Settings2 size={14} />,
           disabled: locked,
           separator: true,
-          run: () => showDialog({ type: 'renameBranch', branch }),
+          run: (anchor) => showDialog({ type: 'renameBranch', branch }, anchor),
         },
         {
           label: t('Set upstream branch…'),
           icon: <Box size={14} />,
           disabled: locked,
-          run: () => showDialog({ type: 'upstream', branch }),
+          run: (anchor) => showDialog({ type: 'upstream', branch }, anchor),
         },
       );
     if (branch.current)
@@ -1298,9 +1698,19 @@ function App() {
             void perform('checkout', { branch: branch.name, remote: branch.remote }, t('Switch Branch'));
         }}
       >
-        <GitBranch size={14} />
-        <span>{label}</span>
-        {branch.current && <span className="current-dot" />}
+        <GitBranch size={14} className={branch.current ? 'current-branch-icon' : undefined} />
+        <span className="branch-label">{label}</span>
+        {branch.current && (
+          <span
+            className="current-check"
+            title={t('Current branch')}
+            role="img"
+            aria-label={t('Current branch')}
+          >
+            <Check size={12} />
+          </span>
+        )}
+        <BranchSync branch={branch} />
       </button>
       <button
         className="icon-button"
@@ -1349,9 +1759,15 @@ function App() {
   };
   const branchList = (branches: Branch[], scope: 'local' | 'remote') => {
     if (!branchGrouped) return branches.map((branch) => branchRow(branch));
-    return groupBranches(branches, scope === 'remote' ? snapshot?.remotes || [] : []).map((entry) =>
+    // The current branch stays on top of the local list, outside the namespace tree.
+    const current = scope === 'local' ? branches.find((branch) => branch.current) : undefined;
+    const tree = groupBranches(
+      current ? branches.filter((branch) => branch !== current) : branches,
+      scope === 'remote' ? snapshot?.remotes || [] : [],
+    ).map((entry) =>
       entry.kind === 'branch' ? branchRow(entry.branch, entry.label) : branchFolder(entry, scope, 0),
     );
+    return current ? [branchRow(current), ...tree] : tree;
   };
   // Section keys have no ':' so they cannot collide with folder keys like `local:feature`.
   const branchSection = (scope: 'local' | 'remote', title: string, branches: Branch[]) => {
@@ -1521,21 +1937,32 @@ function App() {
           <div className="sidebar-rule" />
           <div className="branch-heading">
             <span>{t('Branches')}</span>
-            <IconButton
-              title={branchGrouped ? t('Toggle flat branch list') : t('Group branches by prefix')}
-              className={branchGrouped ? 'active' : ''}
-              disabled={!snapshot?.repository}
-              onClick={() => setBranchGrouped((value) => !value)}
-            >
-              <ListTree size={15} />
-            </IconButton>
-            <IconButton
-              title={t('New branch')}
-              disabled={isBusy || !snapshot?.repository || !snapshot.commits.length}
-              onClick={() => showDialog({ type: 'newBranch' })}
-            >
-              <Plus size={15} />
-            </IconButton>
+            <div className="branch-heading-actions">
+              <IconButton
+                title={branchGrouped ? t('Toggle flat branch list') : t('Group branches by prefix')}
+                className={branchGrouped ? 'active' : ''}
+                disabled={!snapshot?.repository}
+                onClick={() => setBranchGrouped((value) => !value)}
+              >
+                <ListTree size={15} />
+              </IconButton>
+              <IconButton
+                title={t('Fetch all remote branches without changing local branches')}
+                disabled={isBusy || !snapshot?.remotes.length}
+                onClick={() => void perform('fetch', {}, t('Fetch Updates'))}
+              >
+                <RefreshCw size={15} />
+              </IconButton>
+              <IconButton
+                title={t('New branch')}
+                disabled={isBusy || !snapshot?.repository || !snapshot.commits.length}
+                onClick={(event) =>
+                  showDialog({ type: 'newBranch' }, event.currentTarget.getBoundingClientRect())
+                }
+              >
+                <Plus size={15} />
+              </IconButton>
+            </div>
           </div>
           <label className="search-box branch-search">
             <Search size={13} />
@@ -1644,7 +2071,9 @@ function App() {
                 value={sizes.commit}
                 reset={defaultSizes.commit}
                 onChange={resize('commit')}
-                reserve=".file-list"
+                /* Without the middle diff the file list is the elastic 1fr track, so
+                   only its minimum width is reserved; 150 matches the track floor. */
+                reserve={showMiddlePane ? '.file-list' : 150}
                 reserveExtra={showMiddlePane ? 160 : 0}
                 style={{ right: 'var(--commit-width)' }}
               />
@@ -1658,14 +2087,18 @@ function App() {
                   <IconButton
                     title={t('New changelist')}
                     disabled={isBusy}
-                    onClick={() => showDialog({ type: 'changelist' })}
+                    onClick={(event) =>
+                      showDialog({ type: 'changelist' }, event.currentTarget.getBoundingClientRect())
+                    }
                   >
                     <Plus size={15} />
                   </IconButton>
                   <IconButton
                     title={t('Move checked files to a changelist')}
                     disabled={!selected.size || isBusy}
-                    onClick={() => showDialog({ type: 'move' })}
+                    onClick={(event) =>
+                      showDialog({ type: 'move' }, event.currentTarget.getBoundingClientRect())
+                    }
                   >
                     <FolderClosed size={14} />
                   </IconButton>
@@ -1705,7 +2138,15 @@ function App() {
                     </button>
                   )}
                 </label>
-                <div className="file-list" ref={fileViewport.ref}>
+                <div
+                  className="file-list"
+                  data-file-list="changes"
+                  onKeyDown={handleFileListKeyDown}
+                  ref={(element) => {
+                    fileListElement.current = element;
+                    fileViewport.ref(element);
+                  }}
+                >
                   {!changes.length ? (
                     <Empty
                       icon={<CircleCheck size={32} />}
@@ -1791,7 +2232,7 @@ function App() {
                             <div
                               className="file-folder"
                               key={`folder:${item.groupId}:${item.folder.path}`}
-                              style={{ paddingLeft: 6 + item.depth * 12 }}
+                              style={{ paddingLeft: 8 + item.depth * FILE_TREE_INDENT }}
                             >
                               <button
                                 className="file-folder-toggle"
@@ -1816,7 +2257,9 @@ function App() {
                           <div
                             className={`file-row ${activeFile === change.path ? 'selected' : ''} ${fileSelection.has(change.path) ? 'marked' : ''}`}
                             key={`file:${change.path}`}
-                            style={fileGrouped ? { paddingLeft: 6 + item.depth * 12 } : undefined}
+                            style={
+                              fileGrouped ? { paddingLeft: 8 + item.depth * FILE_TREE_INDENT } : undefined
+                            }
                             onContextMenu={(event) => {
                               event.preventDefault();
                               openFileMenu(change, event.clientX, event.clientY);
@@ -1834,11 +2277,14 @@ function App() {
                               aria-label={t('Select file {0}', change.path)}
                               checked={selected.has(change.path)}
                               disabled={isBusy || change.status === 'conflict'}
+                              onFocus={() => setActiveFile(change.path)}
                               onChange={() => toggle(change.path)}
                             />
                             <button
                               className="file-select"
                               data-path={change.path}
+                              data-status={change.status}
+                              onFocus={() => setActiveFile(change.path)}
                               title={`${change.path}\n${statusLabels[change.status]}${stage ? `\n${stage === 'staged' ? t('All changes are staged') : t('Some changes are staged; the working tree has unstaged changes')}` : ''}\n${t('Shift / {0} click to select multiple', navigator.platform.includes('Mac') ? '⌘' : 'Ctrl')}`}
                               onClick={(event) => {
                                 selectFileRow(change.path, event);
@@ -1852,41 +2298,18 @@ function App() {
                                   openNativeDiff(change.path);
                               }}
                               onKeyDown={(event) => {
-                                if (event.key !== 'ArrowDown' && event.key !== 'ArrowUp') {
-                                  if (
-                                    event.key === 'Enter' &&
-                                    !showInlineDiff &&
-                                    change.status !== 'conflict'
-                                  ) {
-                                    event.preventDefault();
-                                    openNativeDiff(change.path);
-                                  }
-                                  if (event.key === ' ' && !isBusy && change.status !== 'conflict') {
-                                    event.preventDefault();
-                                    toggle(change.path);
-                                  }
-                                  return;
+                                if (
+                                  event.key === 'Enter' &&
+                                  !showInlineDiff &&
+                                  change.status !== 'conflict'
+                                ) {
+                                  event.preventDefault();
+                                  openNativeDiff(change.path);
                                 }
-                                event.preventDefault();
-                                const buttons = [
-                                  ...event.currentTarget
-                                    .closest('.file-list')!
-                                    .querySelectorAll<HTMLButtonElement>('.file-select'),
-                                ];
-                                const index =
-                                  buttons.indexOf(event.currentTarget) + (event.key === 'ArrowDown' ? 1 : -1);
-                                const next = buttons[Math.max(0, Math.min(buttons.length - 1, index))];
-                                if (!next) return;
-                                next.focus();
-                                const path = next.dataset.path || '';
-                                if (event.shiftKey)
-                                  selectFileRow(path, {
-                                    shiftKey: true,
-                                    metaKey: false,
-                                    ctrlKey: false,
-                                  });
-                                else if (event.metaKey || event.ctrlKey) setActiveFile(path);
-                                else selectFileRow(path);
+                                if (event.key === ' ' && !isBusy && change.status !== 'conflict') {
+                                  event.preventDefault();
+                                  toggle(change.path);
+                                }
                               }}
                               onDoubleClick={() => {
                                 if (showInlineDiff) openNativeDiff(change.path);
@@ -1894,7 +2317,9 @@ function App() {
                             >
                               <FileIcon file={change.path} />
                               <span className="file-label">
-                                <strong>{basename(change.path)}</strong>
+                                <strong className={`file-name status-${change.status}`}>
+                                  {basename(change.path)}
+                                </strong>
                                 {!fileGrouped && <small>{dirname(change.path) || t('Project root')}</small>}
                               </span>
                               {stage && (
@@ -1916,6 +2341,7 @@ function App() {
                                 {statusLetters[change.status]}
                               </span>
                             </button>
+                            {openFileAction(change.path, change.status !== 'deleted')}
                           </div>
                         );
                       })}
@@ -1997,7 +2423,9 @@ function App() {
                     <button
                       disabled={isBusy || !changes.length}
                       title={t('Stash all local changes, including untracked files')}
-                      onClick={() => showDialog({ type: 'stash' })}
+                      onClick={(event) =>
+                        showDialog({ type: 'stash' }, event.currentTarget.getBoundingClientRect())
+                      }
                     >
                       <Layers size={12} />
                       Stash
@@ -2090,24 +2518,37 @@ function App() {
                     <span className="history-count">{t('Commits: {0}', visibleCommits.length)}</span>
                   </div>
                   <div className="log-table-header">
-                    <span style={{ width: graph.width }}>{t('Commit graph')}</span>
+                    <span style={{ width: graphWidth }}>{t('Commit graph')}</span>
                     <span className="log-subject">{t('Subject')}</span>
                     <span className="log-author">{t('Author')}</span>
                     <span className="log-hash">Hash</span>
                     <span className="log-date">{t('Date')}</span>
                   </div>
-                  <div className="log-scroll" ref={logViewport.ref}>
+                  <div
+                    className="log-scroll"
+                    ref={(element) => {
+                      logListElement.current = element;
+                      logViewport.ref(element);
+                    }}
+                    onKeyDown={handleCommitListKeyDown}
+                  >
                     {!visibleCommits.length ? (
                       <Empty
                         icon={<History size={32} />}
-                        title={logQuery || branchFilter ? t('No matching commits') : t('No commits yet')}
+                        title={
+                          branchFilter && !branchCommits
+                            ? t('Reading branch history…')
+                            : logQuery || branchFilter
+                              ? t('No matching commits')
+                              : t('No commits yet')
+                        }
                         detail={t('History will appear here after the first commit.')}
                       />
                     ) : (
                       <div className="log-table">
                         <svg
                           className="commit-graph"
-                          width={graph.width}
+                          style={{ width: graphWidth }}
                           height={visibleCommits.length * COMMIT_ROW_HEIGHT}
                           aria-hidden="true"
                         >
@@ -2158,6 +2599,7 @@ function App() {
                         {visibleCommits.slice(logStart, logEnd).map((commit) => (
                           <button
                             key={commit.hash}
+                            data-hash={commit.hash}
                             className={`log-row ${activeCommit === commit.hash ? 'selected' : ''}`}
                             onClick={() => {
                               setActiveCommit(commit.hash);
@@ -2183,7 +2625,7 @@ function App() {
                               commit.subject,
                             )}
                           >
-                            <span style={{ width: graph.width }} />
+                            <span style={{ width: graphWidth }} />
                             <span className="log-subject">
                               {commit.refs
                                 .filter((ref) => !ref.startsWith('tag:'))
@@ -2205,6 +2647,11 @@ function App() {
                                     {ref.replace('HEAD -> ', '')}
                                   </span>
                                 ))}
+                              {commit.parents.length > 1 && (
+                                <span className="merge-badge" title={t('Merge commit')}>
+                                  {t('Merge')}
+                                </span>
+                              )}
                               <span>{commit.subject}</span>
                             </span>
                             <span className="log-author">{commit.author}</span>
@@ -2236,6 +2683,11 @@ function App() {
                       <div className="detail-title">
                         <GitCommitHorizontal size={16} />
                         <strong>{t('Commit details')}</strong>
+                        {detail.commit.parents.length > 1 && (
+                          <span className="merge-badge" title={t('Merge commit')}>
+                            {t('Merge')}
+                          </span>
+                        )}
                         <code>{detail.commit.hash.slice(0, 8)}</code>
                       </div>
                       <h3>{detail.commit.subject}</h3>
@@ -2294,7 +2746,7 @@ function App() {
                           </IconButton>
                         )}
                       </div>
-                      <div className="detail-files">
+                      <div className="detail-files" data-file-list="detail" onKeyDown={handleFileListKeyDown}>
                         {fileGrouped
                           ? detailItems.map((item) =>
                               item.kind === 'folder' ? (
@@ -2303,7 +2755,7 @@ function App() {
                                   key={`folder:${item.folder.path}`}
                                   title={item.folder.path}
                                   aria-expanded={!collapsedDetailFolders.has(item.folder.path)}
-                                  style={{ paddingLeft: 8 + item.depth * 12 }}
+                                  style={{ paddingLeft: 8 + item.depth * FILE_TREE_INDENT }}
                                   onClick={() => toggleDetailFolder(item.folder.path)}
                                 >
                                   {collapsedDetailFolders.has(item.folder.path) ? (
@@ -2378,7 +2830,9 @@ function App() {
                   <IconButton
                     title={t('Stash all current changes')}
                     disabled={isBusy || !changes.length}
-                    onClick={() => showDialog({ type: 'stash' })}
+                    onClick={(event) =>
+                      showDialog({ type: 'stash' }, event.currentTarget.getBoundingClientRect())
+                    }
                   >
                     <Plus size={16} />
                   </IconButton>
@@ -2439,23 +2893,30 @@ function App() {
                     </IconButton>
                   </div>
                 )}
-                <div className="detail-files">
+                <div className="detail-files" data-file-list="stash" onKeyDown={handleFileListKeyDown}>
                   {stashFiles.map((file) => (
-                    <button
+                    <div
+                      className={`detail-file-row${stashFile === file.path ? ' selected' : ''}`}
                       key={file.path}
-                      className={stashFile === file.path ? 'selected' : ''}
-                      onClick={() => {
-                        setStashFile(file.path);
-                        if (!showInlineDiff) openNativeDiff(file.path, undefined, activeStash);
-                      }}
                     >
-                      <FileIcon file={file.path} />
-                      <span>
-                        {basename(file.path)}
-                        <small>{dirname(file.path)}</small>
-                      </span>
-                      <b className={`file-status ${file.status}`}>{statusLetters[file.status]}</b>
-                    </button>
+                      <button
+                        className={`detail-select${stashFile === file.path ? ' selected' : ''}`}
+                        data-path={file.path}
+                        onFocus={() => setStashFile(file.path)}
+                        onClick={() => {
+                          setStashFile(file.path);
+                          if (!showInlineDiff) openNativeDiff(file.path, undefined, activeStash);
+                        }}
+                      >
+                        <FileIcon file={file.path} />
+                        <span className={`file-name status-${file.status}`}>
+                          {basename(file.path)}
+                          <small>{dirname(file.path)}</small>
+                        </span>
+                        <b className={`file-status ${file.status}`}>{statusLetters[file.status]}</b>
+                      </button>
+                      {openFileAction(file.path, stashExists(file.path))}
+                    </div>
                   ))}
                 </div>
               </section>
@@ -2584,9 +3045,9 @@ function App() {
           onBranch={openBranchSubmenu}
           onBranchHover={openBranchSubmenu}
           onDismissSubmenu={dismissBranchSubmenu}
-          onNewBranch={() => {
+          onNewBranch={(anchor) => {
             closeBranchDropdown();
-            showDialog({ type: 'newBranch' });
+            showDialog({ type: 'newBranch' }, anchor);
           }}
           newBranchDisabled={isBusy || !!snapshot.operation}
           close={closeBranchDropdown}
@@ -2601,8 +3062,12 @@ function App() {
         >
           <DialogWindow
             key={dialog.type}
-            savedFrame={dialogFrames[dialog.type]}
+            savedFrame={dialog.anchor ? undefined : dialogFrames[dialog.type]}
             onFrameChange={(frame) => rememberDialogFrame(dialog.type, frame)}
+            anchor={dialog.anchor}
+            defaultWidth={
+              dialog.anchor ? (dialog.type === 'move' ? 300 : dialog.type === 'stash' ? 340 : 320) : 480
+            }
             titleId="dialog-title"
           >
             <div className="modal-header">
@@ -2621,9 +3086,13 @@ function App() {
               </span>
               <h2
                 id="dialog-title"
-                title={t(
-                  'Drag the title bar to move, drag the edges to resize, and double-click the title bar to restore the default position and size',
-                )}
+                title={
+                  dialog.anchor
+                    ? undefined
+                    : t(
+                        'Drag the title bar to move, drag the edges to resize, and double-click the title bar to restore the default position and size',
+                      )
+                }
               >
                 {
                   {
@@ -2646,9 +3115,19 @@ function App() {
             {dialog.type === 'compare' ? (
               <>
                 <p className="modal-description comparison-route">
-                  <code>{dialog.branch?.name}</code>
-                  <ArrowLeftRight size={14} />
-                  <code>{snapshot?.branch}</code>
+                  <code>{comparisonSwap ? snapshot?.branch : dialog.branch?.name}</code>
+                  {comparisonSwap && <span className="tag">{t('Current')}</span>}
+                  <ArrowRight size={14} />
+                  <code>{comparisonSwap ? dialog.branch?.name : snapshot?.branch}</code>
+                  {!comparisonSwap && <span className="tag">{t('Current')}</span>}
+                  <span className="spacer" />
+                  <IconButton
+                    title={t('Swap compared branches')}
+                    disabled={isBusy || !comparison}
+                    onClick={() => setComparisonSwap((value) => !value)}
+                  >
+                    <ArrowSwap size={14} />
+                  </IconButton>
                 </p>
                 <p className="modal-description">
                   {comparison
@@ -2660,24 +3139,87 @@ function App() {
                       )
                     : t('Comparing branches…')}
                 </p>
-                <div className="comparison-files">
-                  {comparison?.files.map((file) => (
-                    <button
-                      key={file.path}
-                      disabled={isBusy}
-                      onClick={() =>
-                        void perform(
-                          'openBranchDiff',
-                          { path: file.path, base: comparison.base, head: comparison.head },
-                          t('Open Branch Comparison'),
-                        )
+                {comparison && (
+                  <div className="comparison-toolbar">
+                    <span>{t('Changed files')}</span>
+                    <span>{comparison.files.length}</span>
+                    <div className="spacer" />
+                    <IconButton
+                      title={
+                        compareGrouped
+                          ? t('Toggle flat changed file list')
+                          : t('Group changed files by directory')
                       }
+                      className={compareGrouped ? 'active' : ''}
+                      onClick={() => setCompareGrouped((value) => !value)}
                     >
-                      <FileIcon file={file.path} />
-                      <span>{file.originalPath ? `${file.originalPath} → ${file.path}` : file.path}</span>
-                      <b className={`file-status ${file.status}`}>{statusLetters[file.status]}</b>
-                    </button>
-                  ))}
+                      <ListTree size={13} />
+                    </IconButton>
+                  </div>
+                )}
+                <div className="comparison-files" data-file-list="compare" onKeyDown={handleFileListKeyDown}>
+                  {comparison &&
+                    compareItems.map((item) =>
+                      item.kind === 'folder' ? (
+                        <button
+                          key={`folder:${item.folder.path}`}
+                          className="comparison-folder"
+                          title={item.folder.path}
+                          aria-expanded={!collapsedCompareFolders.has(item.folder.path)}
+                          style={{ paddingLeft: 12 + item.depth * FILE_TREE_INDENT }}
+                          onClick={() => toggleCompareFolder(item.folder.path)}
+                        >
+                          {collapsedCompareFolders.has(item.folder.path) ? (
+                            <ChevronRight size={12} />
+                          ) : (
+                            <ChevronDown size={12} />
+                          )}
+                          <FolderClosed size={13} />
+                          <span>{item.folder.name}</span>
+                          <small>{item.folder.count}</small>
+                        </button>
+                      ) : (
+                        <div
+                          className={`comparison-file-row${comparisonFile === item.change.path ? ' selected' : ''}`}
+                          key={item.change.path}
+                        >
+                          <button
+                            className="comparison-select"
+                            data-path={item.change.path}
+                            onFocus={() => setComparisonFile(item.change.path)}
+                            style={
+                              compareGrouped ? { paddingLeft: 26 + item.depth * FILE_TREE_INDENT } : undefined
+                            }
+                            onClick={() => {
+                              setComparisonFile(item.change.path);
+                              void perform(
+                                'openBranchDiff',
+                                {
+                                  path: item.change.path,
+                                  base: comparison.base,
+                                  head: comparison.head,
+                                  keepFocus: true,
+                                },
+                                t('Open Branch Comparison'),
+                              );
+                            }}
+                          >
+                            <FileIcon file={item.change.path} />
+                            <span className={`file-name status-${item.change.status}`}>
+                              {item.change.originalPath
+                                ? `${item.change.originalPath} → ${item.change.path}`
+                                : compareGrouped
+                                  ? basename(item.change.path)
+                                  : item.change.path}
+                            </span>
+                            <b className={`file-status ${item.change.status}`}>
+                              {statusLetters[item.change.status]}
+                            </b>
+                          </button>
+                          {openFileAction(item.change.path, compareExists(item.change.path))}
+                        </div>
+                      ),
+                    )}
                   {comparison && !comparison.files.length && (
                     <p className="sidebar-empty">{t('The two branches have identical file contents')}</p>
                   )}
@@ -2881,7 +3423,10 @@ function App() {
             ) : dialog.type === 'move' ? (
               <>
                 <p className="modal-description">
-                  {t('Move the {0} selected files into a changelist.', selected.size)}
+                  {t(
+                    'Move the {0} selected files into a changelist.',
+                    (dialog.paths ?? selectedFiles).length,
+                  )}
                 </p>
                 <div className="move-options">
                   {[{ id: '', name: t('Default Changelist') }, ...(snapshot?.changelists || [])].map(
@@ -2893,7 +3438,7 @@ function App() {
                         onClick={() =>
                           void perform(
                             'changelist',
-                            { action: 'move', id: list.id, paths: selectedFiles },
+                            { action: 'move', id: list.id, paths: dialog.paths ?? selectedFiles },
                             t('Move Files'),
                             () => setDialog(null),
                           )

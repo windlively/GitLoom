@@ -108,20 +108,71 @@ const state: Snapshot = {
   behind: 0,
   changes,
   commits,
+  // Sorted by branch name, matching the host's for-each-ref order.
   branches: [
     {
       name: 'feature/command-menu',
       current: true,
       remote: false,
       upstream: 'origin/feature/command-menu',
+      ahead: 2,
+      behind: 0,
       subject: subjects[0],
     },
-    { name: 'main', current: false, remote: false, upstream: 'origin/main', subject: subjects[3] },
-    { name: 'feature/project-search', current: false, remote: false, upstream: '', subject: subjects[6] },
-    { name: 'feature/ui/login', current: false, remote: false, upstream: '', subject: subjects[6] },
-    { name: 'origin/main', current: false, remote: true, upstream: '', subject: subjects[3] },
-    { name: 'origin/feature/command-menu', current: false, remote: true, upstream: '', subject: subjects[2] },
-    { name: 'origin/feature/ui/login', current: false, remote: true, upstream: '', subject: subjects[6] },
+    {
+      name: 'feature/project-search',
+      current: false,
+      remote: false,
+      upstream: '',
+      ahead: 0,
+      behind: 0,
+      subject: subjects[6],
+    },
+    {
+      name: 'feature/ui/login',
+      current: false,
+      remote: false,
+      upstream: '',
+      ahead: 0,
+      behind: 0,
+      subject: subjects[6],
+    },
+    {
+      name: 'main',
+      current: false,
+      remote: false,
+      upstream: 'origin/main',
+      ahead: 1,
+      behind: 3,
+      subject: subjects[3],
+    },
+    {
+      name: 'origin/feature/command-menu',
+      current: false,
+      remote: true,
+      upstream: '',
+      ahead: 0,
+      behind: 0,
+      subject: subjects[2],
+    },
+    {
+      name: 'origin/feature/ui/login',
+      current: false,
+      remote: true,
+      upstream: '',
+      ahead: 0,
+      behind: 0,
+      subject: subjects[6],
+    },
+    {
+      name: 'origin/main',
+      current: false,
+      remote: true,
+      upstream: '',
+      ahead: 0,
+      behind: 0,
+      subject: subjects[3],
+    },
   ],
   stashes: [
     {
@@ -138,6 +189,7 @@ const state: Snapshot = {
   operation: null,
   updatedAt: Date.now(),
 };
+const currentBranch = () => state.branches.find((branch) => branch.current);
 // ?scale=N populates synthetic files and commits for large-repository performance checks.
 const scale = Math.min(20000, Number(new URLSearchParams(location.search).get('scale')) || 0);
 if (scale) {
@@ -175,6 +227,7 @@ export async function previewRequest<M extends Method>(
     state.fileLayout = p.layout === 'flat' ? 'flat' : 'tree';
     return;
   }
+  if (method === 'existingFiles') return p.paths;
   if (method === 'diff')
     return {
       path: p.path,
@@ -185,6 +238,24 @@ export async function previewRequest<M extends Method>(
       binary: false,
       truncated: false,
     } satisfies FileDiff;
+  if (method === 'branchLog') {
+    // Mirrors Git: only the commits reachable from the selected branch head. The sample
+    // data decorates a few tips only, so unknown branches fall back to the newest commit.
+    const tip =
+      state.commits.find((commit) =>
+        commit.refs.some((ref) => ref === p.branch || ref === `HEAD -> ${p.branch}`),
+      ) ?? state.commits[0];
+    const reachable = new Set<string>();
+    const queue = tip ? [tip.hash] : [];
+    const index = new Map(state.commits.map((commit) => [commit.hash, commit]));
+    while (queue.length) {
+      const hash = queue.pop()!;
+      if (reachable.has(hash)) continue;
+      reachable.add(hash);
+      queue.push(...(index.get(hash)?.parents || []));
+    }
+    return structuredClone(state.commits.filter((commit) => reachable.has(commit.hash)));
+  }
   if (method === 'commitDetail')
     return {
       commit: state.commits.find((commit) => commit.hash === p.hash)!,
@@ -226,7 +297,12 @@ export async function previewRequest<M extends Method>(
     state.commits.unshift(commit);
     state.changes = state.changes.filter((change) => !p.paths.includes(change.path));
     state.ahead += 1;
-    if (p.push) state.ahead = 0;
+    const branch = currentBranch();
+    if (branch) branch.ahead += 1;
+    if (p.push) {
+      state.ahead = 0;
+      if (branch) branch.ahead = 0;
+    }
     return { output: '预览：提交已完成' };
   }
   if (method === 'checkout' || method === 'createBranch') {
@@ -237,6 +313,8 @@ export async function previewRequest<M extends Method>(
         current: false,
         remote: false,
         upstream: '',
+        ahead: 0,
+        behind: 0,
         subject: state.commits[0].subject,
       });
     state.branch = name;
@@ -245,15 +323,18 @@ export async function previewRequest<M extends Method>(
     });
     return '预览：已切换分支';
   }
-  if (method === 'compareBranch')
+  if (method === 'compareBranch') {
+    const base = state.commits[4].hash,
+      head = state.commits[0].hash;
     return {
       branch: p.branch,
-      base: state.commits[4].hash,
-      head: state.commits[0].hash,
+      base: p.swap ? head : base,
+      head: p.swap ? base : head,
       ahead: 3,
       behind: 1,
       files: changes.slice(0, 4),
     };
+  }
   if (method === 'renameBranch') {
     const branch = state.branches.find((branch) => branch.name === p.branch && !branch.remote);
     if (branch) branch.name = p.name;
@@ -271,8 +352,12 @@ export async function previewRequest<M extends Method>(
   }
   if (method === 'push') {
     state.ahead = 0;
+    const branch = currentBranch();
+    if (branch) branch.ahead = 0;
     return '预览：推送已完成';
   }
+  if (method === 'updateBranch') return `预览：分支 ${p.branch} 已从上游更新`;
+  if (method === 'pushBranch') return `预览：分支 ${p.branch} 已推送`;
   if (method === 'stash') {
     state.stashes.unshift({
       ref: 'stash@{0}',
@@ -292,6 +377,16 @@ export async function previewRequest<M extends Method>(
     state.changes = state.changes.filter((change) => !p.paths.includes(change.path));
     return '预览：更改已回滚';
   }
+  if (method === 'deleteFiles') {
+    state.changes = state.changes.filter((change) => !p.paths.includes(change.path));
+    return '预览：文件已从磁盘删除';
+  }
+  if (method === 'ignorePaths') {
+    state.changes = state.changes.filter(
+      (change) => !(p.paths.includes(change.path) && change.status === 'untracked'),
+    );
+    return '预览：已写入忽略规则';
+  }
   if (method === 'reset') {
     const index = state.commits.findIndex((commit) => commit.hash === p.hash);
     if (index < 0) throw new Error('提交不存在，请刷新后重试。');
@@ -300,6 +395,11 @@ export async function previewRequest<M extends Method>(
     state.changes = state.changes.filter((change) => change.status === 'untracked');
     state.ahead = 0;
     state.behind = 0;
+    const branch = currentBranch();
+    if (branch) {
+      branch.ahead = 0;
+      branch.behind = 0;
+    }
     return '预览：已强制重置';
   }
   if (method === 'changelist') {
