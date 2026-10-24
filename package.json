@@ -2,7 +2,7 @@
   "name": "gitloom",
   "displayName": "GitLoom",
   "description": "%extension.description%",
-  "version": "0.5.8",
+  "version": "0.5.9",
   "publisher": "windlively",
   "license": "MIT",
   "repository": {
@@ -164,7 +164,7 @@
     "test": "tsx --test tests/*.test.ts",
     "test:host": "node scripts/test-host.mjs",
     "vscode:prepublish": "npm run check && npm run build",
-    "package": "vsce package --no-dependencies --out artifacts/gitloom-0.5.8.vsix"
+    "package": "vsce package --no-dependencies --out artifacts/gitloom-0.5.9.vsix"
   },
   "dependencies": {
     "@vscode/codicons": "^0.0.46-24",
